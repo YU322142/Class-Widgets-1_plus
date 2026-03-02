@@ -1356,9 +1356,9 @@ class openProgressDialog(QWidget):
 
         backgnd = self.findChild(QFrame, 'backgnd')
         shadow_effect = QGraphicsDropShadowEffect(self)
-        shadow_effect.setBlurRadius(28)
+        shadow_effect.setBlurRadius(18)
         shadow_effect.setXOffset(0)
-        shadow_effect.setYOffset(6)
+        shadow_effect.setYOffset(4)
         shadow_effect.setColor(QColor(0, 0, 0, 80))
         backgnd.setGraphicsEffect(shadow_effect)
 
@@ -1645,9 +1645,9 @@ class FloatingWidget(QWidget):  # 浮窗
 
         backgnd = self.findChild(QFrame, 'backgnd')
         shadow_effect = QGraphicsDropShadowEffect(self)
-        shadow_effect.setBlurRadius(28)
+        shadow_effect.setBlurRadius(18)
         shadow_effect.setXOffset(0)
-        shadow_effect.setYOffset(6)
+        shadow_effect.setYOffset(4)
         shadow_effect.setColor(QColor(0, 0, 0, 75))
         backgnd.setGraphicsEffect(shadow_effect)
 
@@ -2400,7 +2400,7 @@ class DesktopWidget(QWidget):  # 主要小组件
             shadow_effect = QGraphicsDropShadowEffect(self)
             shadow_effect.setBlurRadius(18)
             shadow_effect.setXOffset(0)
-            shadow_effect.setYOffset(6)
+            shadow_effect.setYOffset(4)
             shadow_effect.setColor(QColor(0, 0, 0, 75))
 
             self.backgnd.setGraphicsEffect(shadow_effect)
