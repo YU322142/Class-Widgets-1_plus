@@ -1440,8 +1440,8 @@ class FloatingWidget(QWidget):  # 浮窗
 
         self.current_lesson_name_text = self.findChild(QLabel, 'subject')
         self.activity_countdown = self.findChild(QLabel, 'activity_countdown')
-        self.countdown_progress_bar = self.findChild(ProgressRing, 'progressBar')
-
+        self.countdown_progress_bar = self.findChild(ProgressRing, 'progressBar') #在该版本小尺寸主题下会返回None
+        #self._setup_shadow()
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
 
@@ -1697,7 +1697,8 @@ class FloatingWidget(QWidget):  # 浮窗
                     )
             else:  # 精确显示
                 self.activity_countdown.setText(cd_list[1])
-            self.countdown_progress_bar.setValue(cd_list[2])
+            if self.countdown_progress_bar is not None:  # 兼容小尺寸浮窗
+                self.countdown_progress_bar.setValue(cd_list[2])
 
         self.adjustSize_animation()
 
@@ -1848,6 +1849,8 @@ class FloatingWidget(QWidget):  # 浮窗
     def adjustSize_animation(self) -> None:
         if not self.text_changed:
             return
+        """
+        #修改前代码保留
         self.setMinimumWidth(200)
         current_geometry = self.geometry()
         label_width = self.current_lesson_name_text.sizeHint().width() + 120
@@ -1859,6 +1862,35 @@ class FloatingWidget(QWidget):  # 浮窗
         self.animation.setEndValue(target_geometry)
         self.animation.setEasingCurve(QEasingCurve.Type.InOutCirc)
         self.animating = True  # 避免动画Bug x114514
+        self.animation.start()
+        self.animation.finished.connect(self.animation_done)
+        """
+        if self.countdown_progress_bar is not None:
+            # 原版UI（上下排列 + 进度环）
+            extra_width = 120
+            min_width = 200
+            label_width = self.current_lesson_name_text.sizeHint().width() + extra_width
+        else:
+            # 精简UI（左右排列，无进度环）
+            # 总宽度 = subject宽 + 间距(8) + countdown宽 + 左右内边距(12×2) + 左右外边距(6×2)
+            extra_width = 8 + 24 + 0  # spacing + padding + margin = 44
+            min_width = 0
+            label_width = (
+                    self.current_lesson_name_text.sizeHint().width()
+                    + self.activity_countdown.sizeHint().width()
+                    + extra_width
+            )
+
+        self.setMinimumWidth(min_width)
+        current_geometry = self.geometry()
+        offset = label_width - current_geometry.width()
+        target_geometry = current_geometry.adjusted(0, 0, offset, 0)
+        self.animation = QPropertyAnimation(self, b'geometry')
+        self.animation.setDuration(450)
+        self.animation.setStartValue(current_geometry)
+        self.animation.setEndValue(target_geometry)
+        self.animation.setEasingCurve(QEasingCurve.Type.InOutCirc)
+        self.animating = True
         self.animation.start()
         self.animation.finished.connect(self.animation_done)
 
@@ -2366,7 +2398,7 @@ class DesktopWidget(QWidget):  # 主要小组件
             str('default' if theme is None else theme)
         ).config.shadow:  # 修改阴影问题
             shadow_effect = QGraphicsDropShadowEffect(self)
-            shadow_effect.setBlurRadius(28)
+            shadow_effect.setBlurRadius(18)
             shadow_effect.setXOffset(0)
             shadow_effect.setYOffset(6)
             shadow_effect.setColor(QColor(0, 0, 0, 75))
