@@ -5,23 +5,24 @@
 <p align="center">
   <img width="16%" align="center" src="img/Logo.png" alt="logo">
 </p>
-  <h1 align="center">
-  Class Widgets 1_plus
-</h1>
-<p align="center">
- Class-Widgets 1的简易修改版
-</p>
+<h1 align="center">Class Widgets 1_plus</h1>
+<p align="center">Class Widgets 1 的简易修改版（Fork）</p>
+
+<div align="center">
+
+> ⚠️ 该项目为基于上游项目的非官方修改版本，不隶属于原项目官方团队。
+
+</div>
+
+
 
 <div align="center">
 
 
-
-## 这个Readme还没写好！
-
 </div>
 
 ## 特性
-- **可以在龙芯Loongarch处理器上直接转译运行，与原项目几乎相同的兼容性**
+- **可以在龙芯Loongarch处理器上转译运行，拥有与原项目几乎相同的兼容性**
 - **更小的浮窗**，更小的屏幕空间占用
 - 由 Python 编写的**插件**系统和插件广场（详见最新构建）
 - 将今日的课程安排以**小组件**的样式为你呈现；
@@ -34,7 +35,10 @@
 - 提供“天气”、“自定义倒计时”等实用小组件；
 - 通过 [“自定义”](https://www.yuque.com/rinlit/class-widgets_help/qyly70ht1ogge1pi) 个性化你的 Class Widgets；
 - 具有亮/暗色主题，还能根据系统设置自动切换；<br>……
+## 修改内容（相对上游）
 
+- 新增/调整小尺寸浮窗布局
+- ......
 ## 修改部分的软件截图
 
 #### 小尺寸浮窗
@@ -42,27 +46,49 @@
 ![scrshot_0](img/screenshot_2.png)
 
 
-![scrshot_0](img/screenshot_1.png)
+![scrshot_0](img/screenshot_3.png)
 
-## 安装&使用
+## 安装与使用
 
 > [!TIP]
-> 可在 [Class Widgets 官方文档](https://www.yuque.com/rinlit/class-widgets_help/gs3gsbms1iivgibm) 查看教程。
+> 可参考原项目 [Class Widgets 官方文档](https://www.yuque.com/rinlit/class-widgets_help/gs3gsbms1iivgibm)。
+
+下载发布页中的压缩包，解压后运行 `ClassWidgets.exe` 即可。  
+可通过托盘菜单进入设置或退出程序。
 
 > [!IMPORTANT]
-> 若要体验此页面的特性，请前往 [**Actions**](https://github.com/Class-Widgets/Class-Widgets/actions) 页面下载最新构建。
+> 若你发布了二进制（如 exe/zip），请确保能获取与该版本对应的完整源码（见下方许可证说明）。
 
-下载 ![当前版本](https://img.shields.io/github/v/release/Class-Widgets/Class-Widgets?style=flat&color=purple&label=%E5%BD%93%E5%89%8D%E7%89%88%E6%9C%AC) 中最新版的压缩文件，解压到合适位置后，运行 `ClassWidgets.exe` 即可。
-可通过托盘菜单进入设置、或退出此程序。
+## 许可证（License）
 
-## 协议
+本项目基于 **GNU General Public License v3.0 (GPL-3.0)** 发布。  
+详情见 [LICENSE](./LICENSE)。
 
-此项目 (Class Widgets 1_plus) 基于 GPL-3.0 许可证授权发布，详情请参阅 [LICENSE](./LICENSE) 文件。
+本项目是对上游项目的修改版本（Fork）：
 
-Copyright © 2026 YU322142
-Copyright © 2025 RinLit.
+- Upstream: [Class-Widgets/Class-Widgets](https://github.com/Class-Widgets/Class-Widgets)
+- 上游版权：Copyright © 2025 RinLit.
+- 本修改版权：Copyright © 2026 YU322142.
+### GPL 合规说明（分发二进制时）
+
+若你分发本项目的可执行文件或打包产物（exe/zip），必须同时提供该版本对应的完整源码，  
+或提供明确、有效的源码获取方式（例如同一仓库对应 tag/release）。
+
+### 非官方声明
+
+本项目为**非官方** fork，**不隶属于**、**不代表**、也**未获得**上游官方背书（除非另行明确说明）。
+### 名称与素材说明
+
+项目名称、Logo、部分美术/图标资源的权利可能归原作者或各自权利方所有。  
+请在再分发时自行确认相关资源许可范围。
 
 ## 致谢
+
+### 上游项目
+
+- [Class-Widgets/Class-Widgets](https://github.com/Class-Widgets/Class-Widgets)
+
+感谢上游维护者与所有贡献者的长期投入。
 
 ### 第三方库和框架
 
@@ -73,27 +99,21 @@ Copyright © 2025 RinLit.
 
 ### 资源
 
-- [SF Symbols](https://developer.apple.com/cn/sf-symbols/) （部分图标已做修改）
+- [SF Symbols](https://developer.apple.com/cn/sf-symbols/)（部分图标已做修改）
 - [和风天气图标](https://icons.qweather.com/)（部分图标已做修改）
 - [Segoe Fluent Icons](https://learn.microsoft.com/zh-cn/windows/apps/design/style/segoe-fluent-icons-font)（部分图标已做修改）
 - [HarmonyOS Sans](https://developer.huawei.com/consumer/cn/design/resource/)
 
-### 原项目贡献
-
-[![Ask zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=for-the-badge&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/Class-Widgets/Class-Widgets) [![Ask DeepWiki](https://img.shields.io/badge/Ask_DeepWiki-blue.svg?style=for-the-badge&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACwAAAAyCAYAAAAnWDnqAAAAAXNSR0IArs4c6QAAA05JREFUaEPtmUtyEzEQhtWTQyQLHNak2AB7ZnyXZMEjXMGeK/AIi+QuHrMnbChYY7MIh8g01fJoopFb0uhhEqqcbWTp06/uv1saEDv4O3n3dV60RfP947Mm9/SQc0ICFQgzfc4CYZoTPAswgSJCCUJUnAAoRHOAUOcATwbmVLWdGoH//PB8mnKqScAhsD0kYP3j/Yt5LPQe2KvcXmGvRHcDnpxfL2zOYJ1mFwrryWTz0advv1Ut4CJgf5uhDuDj5eUcAUoahrdY/56ebRWeraTjMt/00Sh3UDtjgHtQNHwcRGOC98BJEAEymycmYcWwOprTgcB6VZ5JK5TAJ+fXGLBm3FDAmn6oPPjR4rKCAoJCal2eAiQp2x0vxTPB3ALO2CRkwmDy5WohzBDwSEFKRwPbknEggCPB/imwrycgxX2NzoMCHhPkDwqYMr9tRcP5qNrMZHkVnOjRMWwLCcr8ohBVb1OMjxLwGCvjTikrsBOiA6fNyCrm8V1rP93iVPpwaE+gO0SsWmPiXB+jikdf6SizrT5qKasx5j8ABbHpFTx+vFXp9EnYQmLx02h1QTTrl6eDqxLnGjporxl3NL3agEvXdT0WmEost648sQOYAeJS9Q7bfUVoMGnjo4AZdUMQku50McDcMWcBPvr0SzbTAFDfvJqwLzgxwATnCgnp4wDl6Aa+Ax283gghmj+vj7feE2KBBRMW3FzOpLOADl0Isb5587h/U4gGvkt5v60Z1VLG8BhYjbzRwyQZemwAd6cCR5/XFWLYZRIMpX39AR0tjaGGiGzLVyhse5C9RKC6ai42ppWPKiBagOvaYk8lO7DajerabOZP46Lby5wKjw1HCRx7p9sVMOWGzb/vA1hwiWc6jm3MvQDTogQkiqIhJV0nBQBTU+3okKCFDy9WwferkHjtxib7t3xIUQtHxnIwtx4mpg26/HfwVNVDb4oI9RHmx5WGelRVlrtiw43zboCLaxv46AZeB3IlTkwouebTr1y2NjSpHz68WNFjHvupy3q8TFn3Hos2IAk4Ju5dCo8B3wP7VPr/FGaKiG+T+v+TQqIrOqMTL1VdWV1DdmcbO8KXBz6esmYWYKPwDL5b5FA1a0hwapHiom0r/cKaoqr+27/XcrS5UwSMbQAAAABJRU5ErkJggg==)](https://deepwiki.com/Class-Widgets/Class-Widgets)
-
-感谢以下同学为 Class Widgets 作出贡献。
-
-[![Contributors](http://contrib.nn.ci/api?repo=Class-Widgets/Class-Widgets&repo=Class-Widgets/plugin-plaza&repo=Class-Widgets/cw-interim-site)](https://github.com/Class-Widgets/Class-Widgets/graphs/contributors)
-![Repobeats](https://repobeats.axiom.co/api/embed/9d06f1435d1b14cb7837d1e863e55f24cc98df23.svg "Repobeats analytics image")
 
 
+## 社区与反馈
 
-## 原项目社区
+- 本项目社区：暂无
+- 上游社区（仅供参考）：
+  - [Discussions](https://github.com/orgs/Class-Widgets/discussions)
+  - [QQ群](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=yHXKCAjOxlpTpJ4mNdXm0mxOneYUinRs&authKey=sd3%2F06iGdOZUjkXXPBeIzGnFDIeYwmdwuM8dhk25fi%2B1CUL32MkeN2EEfjdo2pzE&noverify=0&group_code=169200380)
+  - [Discord](https://discord.gg/EFF4PpqpqZ)
 
- [Discussions](https://github.com/orgs/Class-Widgets/discussions)、[QQ群](http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=yHXKCAjOxlpTpJ4mNdXm0mxOneYUinRs&authKey=sd3%2F06iGdOZUjkXXPBeIzGnFDIeYwmdwuM8dhk25fi%2B1CUL32MkeN2EEfjdo2pzE&noverify=0&group_code=169200380) 、 [Discord 服务器](https://discord.gg/EFF4PpqpqZ)。
-
-
-##
+---
 
 这仅是我作为新人的练习作品，欢迎提供更多意见！
