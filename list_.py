@@ -88,12 +88,14 @@ subject = {
     QCoreApplication.translate("list_", '化学'): '(84, 135, 190',  # 蓝
     QCoreApplication.translate("list_", '美术'): '(0, 186, 255',  # 蓝
     QCoreApplication.translate("list_", '音乐'): '(255, 101, 158',  # 红
-    QCoreApplication.translate("list_", '体育'): '(255, 151, 135',  # 红
+    QCoreApplication.translate("list_", '体育'): '(255, 151, 135',# 红
+    QCoreApplication.translate("list_", '体育活动'): '(255, 151, 135',# 红
     QCoreApplication.translate("list_", '信息技术'): '(84, 135, 190',  # 蓝
     QCoreApplication.translate("list_", '电脑'): '(84, 135, 190',  # 蓝
     QCoreApplication.translate("list_", '课程表未加载'): '(255, 151, 135',  # 红
     QCoreApplication.translate("list_", '班会'): '(255, 151, 135',  # 红
     QCoreApplication.translate("list_", '自习'): '(115, 255, 150',  # 绿
+    QCoreApplication.translate("list_", '校本或社团'): '(115, 255, 150',  # 绿
     QCoreApplication.translate("list_", '课间'): '(135, 255, 191',  # 绿
     QCoreApplication.translate("list_", '大课间'): '(255, 151, 135',  # 红
     QCoreApplication.translate("list_", '放学'): '(84, 255, 101',  # 绿
@@ -123,6 +125,8 @@ class_kind = [
     QCoreApplication.translate("list_", '物理'),
     QCoreApplication.translate("list_", '化学'),
     QCoreApplication.translate("list_", '体育'),
+    QCoreApplication.translate("list_", '体育活动'),
+    QCoreApplication.translate("list_", '校本或社团'),
     QCoreApplication.translate("list_", '班会'),
     QCoreApplication.translate("list_", '自习'),
     QCoreApplication.translate("list_", '早读'),
@@ -232,11 +236,13 @@ except Exception as e:
         QCoreApplication.translate("list_", '美术'): 'art',
         QCoreApplication.translate("list_", '音乐'): 'music',
         QCoreApplication.translate("list_", '体育'): 'pe',
+        QCoreApplication.translate("list_", '体育活动'): 'pe',
         QCoreApplication.translate("list_", '信息技术'): 'it',
         QCoreApplication.translate("list_", '电脑'): 'it',
         QCoreApplication.translate("list_", '课程表未加载'): 'xmark',
         QCoreApplication.translate("list_", '班会'): 'meeting',
         QCoreApplication.translate("list_", '自习'): 'self_study',
+        QCoreApplication.translate("list_", '校本或社团'): 'self_study',
         QCoreApplication.translate("list_", '课间'): 'break',
         QCoreApplication.translate("list_", '大课间'): 'pe',
         QCoreApplication.translate("list_", '放学'): 'after_school',

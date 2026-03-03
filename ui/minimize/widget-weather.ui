@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>180</width>
+    <width>210</width>
     <height>110</height>
    </rect>
   </property>
@@ -30,7 +30,7 @@
     <rect>
      <x>10</x>
      <y>10</y>
-     <width>161</width>
+     <width>191</width>
      <height>41</height>
     </rect>
    </property>
@@ -60,7 +60,7 @@ font-weight: bold;</string>
     <rect>
      <x>10</x>
      <y>10</y>
-     <width>161</width>
+     <width>191</width>
      <height>81</height>
     </rect>
    </property>
@@ -79,7 +79,7 @@ border-image: url();
     <rect>
      <x>30</x>
      <y>30</y>
-     <width>121</width>
+     <width>151</width>
      <height>61</height>
     </rect>
    </property>

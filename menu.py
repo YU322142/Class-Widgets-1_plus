@@ -3300,13 +3300,13 @@ class SettingsMenu(FluentWindow):
         github_page = self.findChild(PushButton, "button_github")
         github_page.clicked.connect(
             lambda: QDesktopServices.openUrl(
-                QUrl(self.tr('https://github.com/RinLit-233-shiroko/Class-Widgets'))
+                QUrl(self.tr('https://github.com/YU322142/Class-Widgets-1_plus'))
             )
         )
 
-        bilibili_page = self.findChild(PushButton, 'button_bilibili')
-        bilibili_page.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl(self.tr('https://space.bilibili.com/569522843')))
+        original_project_page = self.findChild(PushButton, 'button_original_project')
+        original_project_page.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(self.tr('https://github.com/Class-Widgets/Class-Widgets')))
         )
 
         weblate_page = self.findChild(PushButton, 'button_weblate')
@@ -3324,7 +3324,7 @@ class SettingsMenu(FluentWindow):
             lambda: QDesktopServices.openUrl(
                 QUrl(
                     self.tr(
-                        'https://github.com/RinLit-233-shiroko/Class-Widgets?tab=readme-ov-file#致谢'
+                        'https://github.com/YU322142/Class-Widgets-1_plus?tab=readme-ov-file#%E8%87%B4%E8%B0%A2'
                     )
                 )
             )
