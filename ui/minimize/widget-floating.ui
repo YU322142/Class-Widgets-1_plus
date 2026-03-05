@@ -65,7 +65,7 @@ border-radius: 8px</string>
         <property name="font">
          <font>
           <family>Microsoft YaHei UI</family>
-          <pointsize>15</pointsize>
+          <pointsize>17怎么</pointsize>
           <weight>75</weight>
           <bold>true</bold>
          </font>
@@ -84,13 +84,13 @@ font-weight: bold</string>
         <property name="font">
          <font>
           <family>Microsoft YaHei UI</family>
-          <pointsize>12</pointsize>
+          <pointsize>17</pointsize>
           <weight>35</weight>
           <bold>true</bold>
          </font>
         </property>
         <property name="styleSheet">
-         <string notr="true">color: rgba(0, 0, 0, 90);
+         <string notr="true">color: rgba(0, 0, 0, 255);
 font-weight: bold;</string>
         </property>
         <property name="text">

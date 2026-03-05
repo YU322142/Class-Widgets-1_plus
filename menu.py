@@ -3312,7 +3312,7 @@ class SettingsMenu(FluentWindow):
         weblate_page = self.findChild(PushButton, 'button_weblate')
         weblate_page.clicked.connect(
             lambda: QDesktopServices.openUrl(
-                QUrl('https://hosted.weblate.org/engage/class-widgets-1')
+                QUrl('https://322142.xyz')
             )
         )
 

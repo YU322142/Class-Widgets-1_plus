@@ -4045,7 +4045,7 @@ if __name__ == '__main__':
     get_next_lessons()
 
     splash_window.update_status((98, QCoreApplication.translate('main', '加载隐藏状态...')))
-
+    '''
     hide_mode = config_center.read_conf('General', 'hide')
     should_hide = False
     if hide_mode == '1':  # 上课自动隐藏
@@ -4057,6 +4057,41 @@ if __name__ == '__main__':
 
     if should_hide:
         mgr.decide_to_hide()
+    '''
+    hide_mode = config_center.read_conf('General', 'hide')
+
+    # 你的需求：启动时，如果是“上课时隐藏”且当前正在上课 => 只显示浮窗
+    if hide_mode == '1' and current_state == 1:
+        mgr.state = 0  # 标记为隐藏态，避免后续update_data重复触发隐藏逻辑
+
+        # 直接隐藏所有组件，避免与浮窗同时显示
+        for widget in mgr.widgets:
+            widget.hide()
+            with contextlib.suppress(Exception):
+                widget.setWindowOpacity(0)
+
+        # 只显示浮窗
+        if not fw.isVisible():
+            fw.show()
+            if utils.focus_manager:
+                QTimer.singleShot(
+                    0,
+                    lambda w=fw: utils.focus_manager.ignore.emit(
+                        ctypes.c_void_p(int(w.winId())).value
+                    ),
+                )
+    else:
+        # 保持原有逻辑
+        should_hide = False
+        if hide_mode == '1':  # 上课自动隐藏
+            should_hide = current_state == 1
+        elif hide_mode == '2':  # 全屏自动隐藏
+            should_hide = check_windows_maximize() or check_fullscreen()
+        elif hide_mode == '3':  # 灵活隐藏
+            should_hide = current_state == 1
+
+        if should_hide:
+            mgr.decide_to_hide()
 
     if current_state == 1:
         QTimer.singleShot(
