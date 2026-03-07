@@ -3861,40 +3861,43 @@ def _should_exclude_window(title: str, process_name: str) -> bool:
 
 
 def check_windows_maximize() -> bool:
-    """检查是否有窗口最大化"""
+    """检查当前前台窗口是否最大化"""
     if os.name != 'nt':
         return False
-    current_pid = os.getpid()
+
     try:
-        all_windows = pygetwindow.getAllWindows()
+        user32 = ctypes.windll.user32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:
+            return False
+
+        # 排除桌面和 shell 窗口
+        if hwnd == user32.GetDesktopWindow() or hwnd == user32.GetShellWindow():
+            return False
+
+        current_pid = os.getpid()
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        win_pid = pid.value
+
+        if win_pid in (0, current_pid):
+            return False
+
+        process_name = get_process_name(win_pid)
+
+        title_buffer = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title_buffer, 256)
+        title = title_buffer.value.strip()
+
+        if _should_exclude_window(title, process_name):
+            return False
+
+        # IsZoomed: 判断窗口是否最大化
+        return bool(user32.IsZoomed(hwnd))
+
     except Exception as e:
-        logger.warning(f"获取窗口列表时发生错误 (pygetwindow): {e!s}")
+        logger.debug(f"检查前台窗口最大化状态失败: {e!s}")
         return False
-
-    for window in all_windows:
-        try:
-            if not all([window._hWnd, window.visible, window.isMaximized]):
-                continue
-            try:
-                hwnd_int = window._hWnd
-                pid_val = ctypes.c_ulong()
-                ctypes.windll.user32.GetWindowThreadProcessId(hwnd_int, ctypes.byref(pid_val))
-                win_pid = pid_val.value  # 获取进程信息
-                if win_pid in (0, current_pid):
-                    continue
-                process_name = psutil.Process(win_pid).name().lower()
-                title = window.title.strip()
-                if not _should_exclude_window(title, process_name):
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError, ValueError, OSError):
-                continue
-
-        except Exception as e:
-            title = getattr(window, 'title', 'N/A') if window else '未知窗口'
-            logger.debug(f"处理窗口 '{title}' 时发生错误: {e!s}")
-            continue
-
-    return False
 
 
 def get_default_temperature_unit() -> str:
