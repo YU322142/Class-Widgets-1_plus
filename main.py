@@ -1275,10 +1275,19 @@ class WidgetsManager:
             widget.animate_hide(True)
 
     def show_windows(self) -> None:
-        if fw and fw.animating:  # 避免动画Bug
-            return
-        if fw and fw.isVisible():
-            fw.close()
+        if fw:
+            try:
+                if fw.animation:
+                    fw.animation.stop()
+                if fw.animation_rect:
+                    fw.animation_rect.stop()
+            except Exception as e:
+                logger.debug(f'停止浮窗动画失败: {e}')
+            fw.animating = False
+
+            if fw.isVisible():
+                fw.close()
+
         self.state = 1
         for widget in self.widgets:
             widget.animate_show()
@@ -1327,7 +1336,11 @@ class WidgetsManager:
                 fw.close()
             self.full_hide_windows()
         elif config_center.read_conf('General', 'hide_method') == '2':  # 最小化为浮窗
-            if fw and not fw.animating:
+            if fw:
+                try:
+                    fw.prepare_to_show()
+                except Exception as e:
+                    logger.debug(f'切换到浮窗前准备失败: {e}')
                 self.full_hide_windows()
                 fw.show()
                 if utils.focus_manager:
@@ -1580,6 +1593,65 @@ class FloatingWidget(QWidget):  # 浮窗
             )
 
         self.update_callback_id = update_timer.add_callback(self.update_data)
+
+    def sync_size_before_show(self) -> None:
+        """在显示浮窗前，强制根据当前内容同步尺寸"""
+        layout = self.layout()
+        if not layout:
+            return
+
+        try:
+            layout.activate()
+        except Exception:
+            pass
+
+        self.adjustSize()
+        target_size = layout.sizeHint()
+
+        if not target_size.isValid():
+            return
+
+        target_width = max(target_size.width(), self.minimumWidth())
+        target_height = max(target_size.height(), self.minimumHeight())
+
+        if target_width <= 0 or target_height <= 0:
+            return
+
+        self.resize(target_width, target_height)
+
+    def prepare_to_show(self) -> None:
+        """在显示浮窗前，强制停止旧动画并恢复可显示状态"""
+        try:
+            if self.animation:
+                self.animation.stop()
+            if self.animation_rect:
+                self.animation_rect.stop()
+        except Exception as e:
+            logger.debug(f'停止浮窗动画失败: {e}')
+
+        self.animating = False
+
+        # 如果之前 closeEvent 的 cleanup 把浮窗 hide 了，这里先确保可重新显示
+        try:
+            self.show()
+            self.hide()
+        except Exception:
+            pass
+
+        # 重新确保置顶回调存在（closeEvent cleanup 里会移除）
+        if os.name == 'nt' and not self._is_topmost_callback_added:
+            try:
+                if hasattr(utils, 'update_timer') and utils.update_timer:
+                    utils.update_timer.add_callback(self._ensure_topmost, 0.5)
+                    self._is_topmost_callback_added = True
+            except Exception as e:
+                logger.debug(f'重新添加浮窗置顶回调失败: {e}')
+
+        try:
+            self.update_data()
+            self.sync_size_before_show()
+        except Exception as e:
+            logger.debug(f'显示浮窗前更新内容失败: {e}')
 
     def _remove_update_callback(self) -> None:
         try:
@@ -1840,6 +1912,16 @@ class FloatingWidget(QWidget):  # 浮窗
 
     def showEvent(self, a0: QShowEvent) -> None:  # 窗口显示
         logger.info('显示浮窗')
+        self.sync_size_before_show()
+
+        if os.name == 'nt' and not self._is_topmost_callback_added:
+            try:
+                if hasattr(utils, 'update_timer') and utils.update_timer:
+                    utils.update_timer.add_callback(self._ensure_topmost, 0.5)
+                    self._is_topmost_callback_added = True
+            except Exception as e:
+                logger.debug(f'显示浮窗时恢复置顶回调失败: {e}')
+
         current_screen = QApplication.screenAt(self.pos()) or QApplication.primaryScreen()
         screen_geometry = current_screen.availableGeometry()
 
@@ -3670,6 +3752,10 @@ class DesktopWidget(QWidget):  # 主要小组件
             w.setFixedWidth(550)
             if w.exec():
                 if mgr.state:
+                    try:
+                        fw.prepare_to_show()
+                    except Exception as e:
+                        logger.debug(f'切换浮窗前更新尺寸失败: {e}')
                     fw.show()
                     if utils.focus_manager:
                         QTimer.singleShot(
@@ -3682,6 +3768,10 @@ class DesktopWidget(QWidget):  # 主要小组件
                 else:
                     mgr.show_windows()
         elif mgr.state:
+            try:
+                fw.prepare_to_show()
+            except Exception as e:
+                logger.debug(f'切换浮窗前更新尺寸失败: {e}')
             fw.show()
             if utils.focus_manager:
                 QTimer.singleShot(
@@ -3941,6 +4031,11 @@ def init() -> None:
     """
     mgr.init_widgets()
     if not first_start and was_floating_mode and fw:
+        try:
+            fw.update_data()
+            fw.sync_size_before_show()
+        except Exception as e:
+            logger.debug(f'恢复浮窗时同步尺寸失败: {e}')
         fw.show()
         if utils.focus_manager:
             QTimer.singleShot(
@@ -3997,6 +4092,7 @@ def switch_to_floating_on_startup() -> None:
 
         try:
             fw.update_data()
+            fw.sync_size_before_show()
         except Exception as e:
             logger.debug(f'启动时更新浮窗内容失败: {e}')
 
