@@ -1,4 +1,4 @@
-import contextlib
+﻿import contextlib
 import ctypes
 import datetime as dt
 import json
@@ -107,6 +107,10 @@ if os.name == 'nt':
 
 today = dt.date.today()
 
+mgr = None
+fw = None
+system = platform.system()
+
 # 存储窗口对象
 windows = []
 order = []
@@ -188,18 +192,17 @@ sys.excepthook = global_exceptHook  # 设置全局异常捕获
 
 def handle_dark_mode_change(is_dark: bool) -> None:
     """处理DarkModeWatcher触发的UI更新"""
-    if config_center.read_conf('General', 'color_mode') == '2':
-        logger.info(f"系统颜色模式更新: {'深色' if is_dark else '浅色'}")
-        current_theme = Theme.DARK if is_dark else Theme.LIGHT
-        setTheme(current_theme)
-        if mgr:
-            mgr.clear_widgets()
-        else:
-            logger.warning("主题更改时,mgr还未初始化")
-        # if current_state == 1:
-        #      setThemeColor(f"#{config_center.read_conf('Color', 'attend_class')}")
-        # else:
-        #      setThemeColor(f"#{config_center.read_conf('Color', 'finish_class')}")
+    if config_center.read_conf('General', 'color_mode') != '2':
+        return
+
+    logger.info(f"系统颜色模式更新: {'深色' if is_dark else '浅色'}")
+    current_theme = Theme.DARK if is_dark else Theme.LIGHT
+    setTheme(current_theme)
+
+    if mgr:
+        mgr.clear_widgets()
+    else:
+        logger.warning("主题更改时,mgr还未初始化")
 
 
 def setTheme_() -> None:  # 设置主题
@@ -244,22 +247,19 @@ def setTheme_() -> None:  # 设置主题
 
 
 def get_timeline_data() -> List[Tuple[int, str, int, int]]:
-    # if len(loaded_data['timeline']) == 1:
-    #     return loaded_data['timeline']['default']
-    # else:
-    #     if str(current_week) in loaded_data['timeline'] and loaded_data['timeline'][str(current_week)]:  # 如果此周有时间线
-    #         return loaded_data['timeline'][str(current_week)]
-    #     else:
-    #         return loaded_data['timeline']['default']
-    if (
-        str(current_week)
-        in (data := loaded_data['timeline_even' if conf.get_week_type() else 'timeline'])
-        and data[str(current_week)]
-    ):  # 如果此周有时间线
+    """获取当前应使用的时间线数据"""
+    key = 'timeline_even' if conf.get_week_type() else 'timeline'
+    data = loaded_data.get(key, {})
+
+    if str(current_week) in data and data[str(current_week)]:
         return data[str(current_week)]
-    if conf.get_week_type() and (data := loaded_data.get('timeline_even', {}).get('default', [])):
-        return data
-    return loaded_data['timeline'].get('default', [])
+
+    if conf.get_week_type():
+        even_default = loaded_data.get('timeline_even', {}).get('default', [])
+        if even_default:
+            return even_default
+
+    return loaded_data.get('timeline', {}).get('default', [])
 
 
 def get_schedule_map() -> Dict[str, List[str]]:
@@ -283,11 +283,15 @@ def get_schedule_map() -> Dict[str, List[str]]:
 def get_start_time() -> None:
     global parts_start_time, timeline_data, loaded_data, order, parts_type
     loaded_data = schedule_center.schedule_data
-    timeline = get_timeline_data()  # 实际上这里的 Tuple 是靠 List 实现的
-    part: Dict[str, Tuple[int, int, str]] = loaded_data['part']
+    timeline = get_timeline_data()
+    part: Dict[str, Tuple[int, int, str]] = loaded_data.get('part', {})
+
     parts_start_time = []
     timeline_data = []
     order = []
+    parts_type = []
+
+    part_entries = []
 
     for item_name, item_value in part.items():
         try:
@@ -300,85 +304,68 @@ def get_start_time() -> None:
                 logger.error(f'加载课程表文件[节点类型]出错：{e}')
                 part_type = 'part'
 
-            # 使用基础时间，不应用偏移（偏移在比较时统一处理）
             current_time_manager = TimeManagerFactory.get_instance()
             base_time = dt.datetime.combine(current_time_manager.get_today(), dt.time(h, m))
-            parts_start_time.append(base_time)
-            order.append(item_name)
-            parts_type.append(part_type)
+
+            part_entries.append((base_time, str(item_name), part_type))
         except Exception as e:
             logger.error(f'加载课程表文件[起始时间]出错：{e}')
 
-    paired = zip(parts_start_time, order)
-    paired_sorted = sorted(paired, key=lambda x: x[0])  # 按时间大小排序
-    if paired_sorted:
-        parts_start_time, order = zip(*paired_sorted)
+    part_entries.sort(key=lambda x: x[0])
+
+    parts_start_time = [x[0] for x in part_entries]
+    order = [x[1] for x in part_entries]
+    parts_type = [x[2] for x in part_entries]
 
     def sort_timeline_key(item: Tuple[int, str, int, int]):
-        # if len(item_name) > 1:
-        #     try:
-        #         # 提取节点序数
-        #         part_num = int(item_name[1])
-        #         # 提取课程序数
-        #         class_num = 0
-        #         if len(item_name) > 2:
-        #             class_num = int(item_name[2:])
-        #         if prefix == 'a':
-        #             return part_num, class_num, 0
-        #         else:
-        #             return part_num, class_num, 1
-        #     except ValueError:
-        #         # 如果转换失败，返回原始字符串
-        #         return item_name
-        # return item_name
         return item[1], item[2], item[0]
+
+
+
 
     # 对timeline排序后添加到timeline_data
     timeline_data = sorted(timeline, key=sort_timeline_key)
     # timeline_data = timeline.copy()  # 直接复制，避免修改原数据
 
 
-def get_part() -> Optional[Tuple[dt.datetime, int]]:
-    if not parts_start_time:
+def get_part() -> Optional[Tuple[dt.datetime, str]]:
+    if not parts_start_time or not order:
         return None
 
-    def return_data():
-        base_time = parts_start_time[i]
-        current_manager = TimeManagerFactory.get_instance()
-        c_time = current_manager.get_current_time().replace(
+    current_manager = TimeManagerFactory.get_instance()
+    current_dt = current_manager.get_current_time()
+
+    adjusted_parts = []
+    for i, base_time in enumerate(parts_start_time):
+        adjusted_start_time = current_dt.replace(
             hour=base_time.hour,
             minute=base_time.minute,
             second=base_time.second,
             microsecond=base_time.microsecond,
         )
-        return c_time, int(order[i])  # 返回开始时间、Part序号
+        adjusted_parts.append((i, adjusted_start_time, str(order[i])))
 
-    current_dt = TimeManagerFactory.get_instance().get_current_time()  # 当前时间
+    # 还没到第一段，返回第一段
+    if adjusted_parts and current_dt < adjusted_parts[0][1]:
+        return adjusted_parts[0][1], adjusted_parts[0][2]
 
-    for i, base_time in enumerate(parts_start_time):  # 遍历每个Part
-        time_len = dt.timedelta(minutes=0)  # Part长度
+    # 处于某个 part 的时间范围内
+    for i, adjusted_start_time, part_name in adjusted_parts:
+        time_len = dt.timedelta(minutes=0)
 
         for _isbreak, item_name, _item_index, item_time in timeline_data:
-            # if item_name.startswith(f'a{str(order[i])}') or item_name.startswith(f'f{str(order[i])}'):
-            if item_name == order[i]:
-                time_len += dt.timedelta(minutes=int(item_time))  # 累计Part的时间点总长度
-            time_len += dt.timedelta(seconds=1)
+            if item_name == part_name:
+                time_len += dt.timedelta(minutes=int(item_time))
+                time_len += dt.timedelta(seconds=1)
 
-        if time_len != dt.timedelta(seconds=1):  # 有课程
-            if i == len(parts_start_time) - 1:  # 最后一个Part
-                return return_data()
-            # 将基础时间转换为当前时间基准进行比较
-            current_manager = TimeManagerFactory.get_instance()
-            adjusted_start_time = current_manager.get_current_time().replace(
-                hour=base_time.hour,
-                minute=base_time.minute,
-                second=base_time.second,
-                microsecond=base_time.microsecond,
-            )
-            if current_dt <= adjusted_start_time + time_len:
-                return return_data()
+        if time_len <= dt.timedelta(0):
+            continue
 
-    return parts_start_time[0], 0
+        if adjusted_start_time <= current_dt <= adjusted_start_time + time_len:
+            return adjusted_start_time, part_name
+
+    # 当天课程全部结束
+    return None
 
 
 def get_excluded_lessons() -> None:
@@ -393,6 +380,7 @@ def get_excluded_lessons() -> None:
 # 获取当前活动
 def get_current_lessons() -> None:  # 获取当前课程
     global current_lessons
+    current_lessons = {}
     timeline = get_timeline_data()
     schedule = get_schedule_map()
     class_count = 0
@@ -426,163 +414,240 @@ def get_current_lessons() -> None:  # 获取当前课程
                 class_count += 1
 
 
-# 获取倒计时、弹窗提示
-def get_countdown(toast: bool = False) -> Optional[Tuple[str, str, int]]:  # 重构好累aaaa
-    global last_notify_time, sent_notifications
-    current_dt = TimeManagerFactory.get_instance().get_current_time()
-    if last_notify_time and (current_dt - last_notify_time).seconds < notify_cooldown:
-        return None
 
-    def can_send_notification(state: int, lesson_name: str = '') -> bool:
-        """检查是否可以发送通知"""
-        notification_key = f"{state}_{lesson_name}_{current_dt.strftime('%Y-%m-%d_%H:%M')}"
-        current_timestamp = current_dt.timestamp()
-        expired_keys = [
-            key
-            for key, timestamp in sent_notifications.items()
-            if current_timestamp - timestamp > notification_dedup_timeout
+reminder_engine = None
+
+
+class ReminderEngine:
+    """统一的提醒引擎，负责预备铃 / 上课 / 下课 / 放学提醒"""
+
+    def __init__(self) -> None:
+        self.sent_events = {}
+        self.last_day = None
+        self.tolerance_seconds = 1.2
+        self.keep_seconds = 24 * 60 * 60
+
+    def _reset_if_new_day(self, now: dt.datetime) -> None:
+        day_key = now.strftime('%Y-%m-%d')
+        if self.last_day != day_key:
+            self.last_day = day_key
+            self.sent_events.clear()
+
+    def _prune(self, now: dt.datetime) -> None:
+        now_ts = now.timestamp()
+        expired = [
+            k for k, v in self.sent_events.items()
+            if now_ts - v > self.keep_seconds
         ]
-        for key in expired_keys:
-            del sent_notifications[key]
-        if notification_key in sent_notifications:
+        for k in expired:
+            self.sent_events.pop(k, None)
+
+    def _send_once(self, key: str, sender) -> bool:
+        now = TimeManagerFactory.get_instance().get_current_time_without_ms()
+        ts = now.timestamp()
+        if key in self.sent_events:
             return False
-        sent_notifications[notification_key] = current_timestamp
-        print(True)
+        self.sent_events[key] = ts
+        sender()
         return True
 
-    def after_school():  # 放学
-        if parts_type[part] == 'break':  # 休息段
-            if can_send_notification(0, current_lesson_name):
-                notification.push_notification(0, current_lesson_name)  # 下课
-        elif config_center.read_conf('Toast', 'after_school') == '1':
-            if can_send_notification(2):
-                notification.push_notification(2)  # 放学
+    def _build_class_blocks(self):
+        """构建当天所有课程块（仅非课间）"""
+        blocks = []
+        no_lesson_text = QCoreApplication.translate('main', '暂无课程')
 
-    # 当前时间舍去毫秒，否则后面判定时间相等始终是False
-    current_dt = TimeManagerFactory.get_instance().get_current_time_without_ms()
-    got_return_data = False
+        if not parts_start_time or not order:
+            return blocks
 
-    if parts_start_time:
-        get_part_data = get_part()
-        if not get_part_data:
-            return None
-        c_time, part = get_part_data
+        for idx, part_name in enumerate(order):
+            if idx >= len(parts_start_time):
+                continue
 
-        if current_dt >= c_time:
-            for isbreak, item_name, _item_index, item_time in timeline_data:
-                # if item_name.startswith(f'a{str(part)}') or item_name.startswith(f'f{str(part)}'):
-                if item_name == str(part):
-                    # 判断时间是否上下课，发送通知
-                    if current_dt == c_time and toast:
-                        if not isbreak:
-                            if can_send_notification(1, next_lessons[0]):
-                                notification.push_notification(1, next_lessons[0])  # 上课
-                                last_notify_time = current_dt
-                        elif next_lessons:  # 下课/放学
-                            if can_send_notification(0, next_lessons[0]):
-                                notification.push_notification(0, next_lessons[0])  # 下课
-                                last_notify_time = current_dt
-                        else:
-                            after_school()
+            start_cursor = parts_start_time[idx]
+            part_items = [x for x in timeline_data if str(x[1]) == str(part_name)]
+            if not part_items:
+                continue
 
-                    if (
-                        (
-                            current_dt
-                            == c_time
-                            - dt.timedelta(
-                                minutes=int(config_center.read_conf('Toast', 'prepare_minutes'))
-                            )
-                            and current_dt != last_notify_time
-                        )
-                        and (
-                            config_center.read_conf('Toast', 'prepare_minutes') != '0'
-                            and toast
-                            and not isbreak
-                        )
-                        and not current_state
-                    ):  # 课间
-                        if can_send_notification(3, next_lessons[0]):
-                            notification.push_notification(3, next_lessons[0])  # 准备上课（预备铃）
-                            last_notify_time = current_dt
+            for isbreak, item_name, item_index, item_time in part_items:
+                try:
+                    minutes = int(item_time)
+                except Exception:
+                    minutes = 0
 
-                    # 放学
-                    if (
-                        c_time + dt.timedelta(minutes=int(item_time)) == current_dt
-                        and not next_lessons
-                        and toast
-                    ):
-                        after_school()
-                        last_notify_time = current_dt
+                item_start = start_cursor
+                item_end = start_cursor + dt.timedelta(minutes=minutes)
 
-                    add_time = int(item_time)
-                    c_time += dt.timedelta(minutes=add_time)
+                if not isbreak:
+                    lesson_name = current_lessons.get(
+                        (isbreak, item_name, item_index),
+                        no_lesson_text
+                    )
+                    blocks.append({
+                        'part': str(part_name),
+                        'item_name': str(item_name),
+                        'item_index': item_index,
+                        'start': item_start,
+                        'end': item_end,
+                        'lesson_name': lesson_name,
+                    })
 
-                    if got_return_data:
-                        break
+                start_cursor = item_end
 
-                    if c_time >= current_dt:
-                        # 根据所在时间段使用不同标语
-                        # 返回倒计时、进度条
-                        time_diff = c_time - current_dt
-                        minute, sec = divmod(time_diff.seconds, 60)
-                        # 进度条
-                        seconds = time_diff.seconds
-                        got_return_data = True
-                        return (
-                            QCoreApplication.translate('main', '课间时长还有')
-                            if isbreak
-                            else QCoreApplication.translate('main', '当前活动结束还有'),
-                            f'{minute:02d}:{sec:02d}',
-                            int(100 - seconds / (int(item_time) * 60) * 100),
-                        )
-            return (QCoreApplication.translate('main', '目前课程已结束'), '00:00', 100)
-        prepare_minutes_str = config_center.read_conf('Toast', 'prepare_minutes')
-        if prepare_minutes_str != '0' and toast:
+        blocks.sort(key=lambda x: x['start'])
+        return blocks
+
+    def _next_valid_lesson(self, blocks, idx: int):
+        no_lesson_text = QCoreApplication.translate('main', '暂无课程')
+        for j in range(idx + 1, len(blocks)):
+            name = blocks[j]['lesson_name']
+            if name and name != no_lesson_text:
+                return name
+        return None
+
+    def process(self, now: dt.datetime) -> None:
+        """处理提醒触发"""
+        self._reset_if_new_day(now)
+        self._prune(now)
+
+        blocks = self._build_class_blocks()
+        if not blocks:
+            return
+
+        no_lesson_text = QCoreApplication.translate('main', '暂无课程')
+        prepare_minutes_str = config_center.read_conf('Toast', 'prepare_minutes') or '0'
+
+        attend_enabled = config_center.read_conf('Toast', 'attend_class') == '1'
+        finish_enabled = config_center.read_conf('Toast', 'finish_class') == '1'
+        prepare_enabled = config_center.read_conf('Toast', 'prepare_class') == '1'
+        after_school_enabled = config_center.read_conf('Toast', 'after_school') == '1'
+
+        try:
             prepare_minutes = int(prepare_minutes_str)
-            if current_dt == c_time - dt.timedelta(minutes=prepare_minutes):
-                next_lesson_name = None
-                next_lesson_key = None
-                if timeline_data:
-                    for isbreak, item_name, item_index, item_time in timeline_data:
-                        # if key.startswith(f'a{str(part)}'):
-                        if not isbreak and item_name == str(part):
-                            next_lesson_key = (isbreak, item_name, item_index)
-                            break
-                if next_lesson_key and next_lesson_key in current_lessons:
-                    lesson_name = current_lessons[next_lesson_key]
-                    if lesson_name != QCoreApplication.translate('main', '暂无课程'):
-                        next_lesson_name = lesson_name
-                if current_state == 0:
-                    now = TimeManagerFactory.get_instance().get_current_time()
-                    if (
-                        (
-                            not last_notify_time
-                            or (now - last_notify_time).seconds >= notify_cooldown
-                        )
-                        and next_lesson_name is not None
-                        and can_send_notification(3, next_lesson_name)
-                    ):
-                        notification.push_notification(3, next_lesson_name)
-                        last_notify_time = now
+        except Exception:
+            prepare_minutes = 0
 
-        # if f'a{part}1' in timeline_data:
+        for idx, block in enumerate(blocks):
+            lesson_name = block['lesson_name']
+            start_time = block['start']
+            end_time = block['end']
 
-        def have_class():
-            return any(
-                not data[0] and data[1] == str(part) and data[2] == 1 for data in timeline_data
-            )
+            valid_lesson = bool(lesson_name) and lesson_name != no_lesson_text
 
-        if have_class():  # 有课程
+            # 预备提醒
+            if prepare_enabled and prepare_minutes > 0 and valid_lesson:
+                prepare_time = start_time - dt.timedelta(minutes=prepare_minutes)
+                if is_time_reached(now, prepare_time):
+                    key = f"prepare|{start_time.strftime('%Y-%m-%d %H:%M:%S')}|{lesson_name}"
+                    self._send_once(
+                        key,
+                        lambda ln=lesson_name: notification.push_notification(3, ln)
+                    )
+
+            # 上课提醒
+            if attend_enabled and valid_lesson and is_time_reached(now, start_time):
+                key = f"start|{start_time.strftime('%Y-%m-%d %H:%M:%S')}|{lesson_name}"
+                self._send_once(
+                    key,
+                    lambda ln=lesson_name: notification.push_notification(1, ln)
+                )
+
+            # 下课 / 放学提醒
+            if is_time_reached(now, end_time):
+                next_lesson_name = self._next_valid_lesson(blocks, idx)
+
+                if next_lesson_name and finish_enabled:
+                    key = f"end|{end_time.strftime('%Y-%m-%d %H:%M:%S')}|{next_lesson_name}"
+                    self._send_once(
+                        key,
+                        lambda ln=next_lesson_name: notification.push_notification(0, ln)
+                    )
+                elif not next_lesson_name and after_school_enabled:
+                    key = f"after_school|{end_time.strftime('%Y-%m-%d %H:%M:%S')}"
+                    self._send_once(
+                        key,
+                        lambda: notification.push_notification(2)
+                    )
+
+
+# 获取倒计时、弹窗提示
+def get_countdown(toast: bool = False) -> Optional[Tuple[str, str, int]]:
+    """获取倒计时；提醒触发由 ReminderEngine 统一处理"""
+    global reminder_engine
+
+    if reminder_engine is None:
+        reminder_engine = ReminderEngine()
+
+    current_dt = TimeManagerFactory.get_instance().get_current_time_without_ms()
+
+    # 统一提醒处理
+    if toast:
+        try:
+            reminder_engine.process(current_dt)
+        except Exception as e:
+            logger.error(f'提醒引擎执行失败: {e}')
+
+    if not parts_start_time:
+        return None
+
+    get_part_data = get_part()
+    if not get_part_data:
+        return (QCoreApplication.translate('main', '目前课程已结束'), '00:00', 100)
+
+    c_time, part = get_part_data
+
+    # 还没到当前 part 开始时间
+    if current_dt < c_time:
+        has_class = any(
+            (not isbreak) and str(item_name) == str(part)
+            for isbreak, item_name, item_index, item_time in timeline_data
+        )
+        if has_class:
             time_diff = c_time - current_dt
-            minute, sec = divmod(time_diff.seconds, 60)
+            total_seconds = max(0, int(time_diff.total_seconds()))
+            minute, sec = divmod(total_seconds, 60)
             return (
                 QCoreApplication.translate('main', '距离上课还有'),
                 f'{minute:02d}:{sec:02d}',
                 100,
             )
         return (QCoreApplication.translate('main', '目前课程已结束'), '00:00', 100)
-    return None
 
+    # 已进入当前 part，逐项查找当前所处时间段
+    for isbreak, item_name, item_index, item_time in timeline_data:
+        if str(item_name) != str(part):
+            continue
+
+        try:
+            minutes = int(item_time)
+        except Exception:
+            minutes = 0
+
+        end_time = c_time + dt.timedelta(minutes=minutes)
+
+        # 当前落在该时间片内
+        if current_dt < end_time or is_time_reached(current_dt, end_time):
+            time_diff = end_time - current_dt
+            total_seconds = max(0, int(time_diff.total_seconds()))
+            minute, sec = divmod(total_seconds, 60)
+
+            if minutes > 0:
+                progress = int(100 - (total_seconds / (minutes * 60)) * 100)
+            else:
+                progress = 100
+
+            progress = max(0, min(100, progress))
+
+            return (
+                QCoreApplication.translate('main', '课间时长还有')
+                if isbreak
+                else QCoreApplication.translate('main', '当前活动结束还有'),
+                f'{minute:02d}:{sec:02d}',
+                progress,
+            )
+
+        c_time = end_time
+
+    return (QCoreApplication.translate('main', '目前课程已结束'), '00:00', 100)
 
 # 获取将发生的活动
 def get_next_lessons() -> None:
@@ -599,13 +664,18 @@ def get_next_lessons() -> None:
         c_time, part = get_part_data
 
         def before_class():
-            if part in {0, 3}:
+            part_index = get_part_index(part)
+            if part_index == -1:
+                return False
+
+            if str(part) in {'0', '3'}:
                 return True
+
             return current_dt >= TimeManagerFactory.get_instance().get_current_time().replace(
-                hour=parts_start_time[part].hour,
-                minute=parts_start_time[part].minute,
-                second=parts_start_time[part].second,
-                microsecond=parts_start_time[part].microsecond,
+                hour=parts_start_time[part_index].hour,
+                minute=parts_start_time[part_index].minute,
+                second=parts_start_time[part_index].second,
+                microsecond=parts_start_time[part_index].microsecond,
             ) - dt.timedelta(minutes=60)
 
         if before_class():
@@ -653,8 +723,12 @@ def get_current_lesson_name() -> None:
         c_time, part = get_part_data
 
         if current_dt >= c_time:
-            if parts_type[part] == 'break':  # 休息段
-                current_lesson_name = loaded_data['part_name'][str(part)]
+            part_index = get_part_index(part)
+            if part_index != -1 and parts_type[part_index] == 'break':
+                current_lesson_name = loaded_data.get('part_name', {}).get(
+                    str(part),
+                    QCoreApplication.translate('main', '休息段')
+                )
                 current_state = 2
 
             for isbreak, item_name, item_index, item_time in timeline_data:
@@ -665,7 +739,10 @@ def get_current_lesson_name() -> None:
                     if c_time > current_dt:
                         # if item_name.startswith('a'):
                         if not isbreak:
-                            current_lesson_name = current_lessons[(isbreak, item_name, item_index)]
+                            current_lesson_name = current_lessons.get(
+                                (isbreak, item_name, item_index),
+                                QCoreApplication.translate('main', '暂无课程'),
+                            )
                             current_state = 1
                         else:
                             current_lesson_name = QCoreApplication.translate('main', '课间')
@@ -678,17 +755,14 @@ def get_hide_status() -> int:
     # 满分啦（
     # 祝所有用 Class Widgets 的、不用 Class Widgets 的学子体测满分啊（（
     global current_state, current_lesson_name, excluded_lessons
-    return (
-        1
-        if {
-            '0': lambda: 0,
-            '1': lambda: current_state,
-            '2': lambda: check_windows_maximize() or check_fullscreen(),
-            '3': lambda: current_state,
-        }[str(config_center.read_conf('General', 'hide'))]()
-        and current_lesson_name not in excluded_lessons
-        else 0
-    )
+    hide_mode = str(config_center.read_conf('General', 'hide'))
+    should_hide = {
+        '0': lambda: False,
+        '1': lambda: current_state == 1,
+        '2': lambda: check_windows_maximize() or check_fullscreen(),
+        '3': lambda: current_state == 1,
+    }.get(hide_mode, lambda: False)()
+    return 1 if should_hide and current_lesson_name not in excluded_lessons else 0
 
 
 # 定义 RECT 结构体
@@ -701,13 +775,14 @@ class RECT(ctypes.Structure):
     ]
 
 
-def get_process_name(pid: Union[int, Any]) -> str:  # 获取进程名称
+def get_process_name(pid: Union[int, Any]) -> str:
     try:
         if isinstance(pid, int):
-            pid = ctypes.windll.user32.GetWindowThreadProcessId(pid, None)
-        return psutil.Process(pid).name().lower()
-    except (psutil.NoSuchProcess, AttributeError, ValueError):
+            return psutil.Process(pid).name().lower()
+        return psutil.Process(int(pid)).name().lower()
+    except (psutil.NoSuchProcess, AttributeError, ValueError, TypeError):
         return "unknown"
+
 
 
 def check_fullscreen() -> bool:  # 检查是否全屏
@@ -789,7 +864,9 @@ class ErrorDialog(Dialog):  # 重大错误提示框
 
         global splash_window
 
-        splash_window.error()
+        if splash_window:
+            with contextlib.suppress(Exception):
+                splash_window.error()
 
         super().__init__(
             QCoreApplication.translate('ErrorDialog', 'Class Widgets 崩溃报告'),
@@ -862,6 +939,11 @@ class ErrorDialog(Dialog):  # 重大错误提示框
         self.buttonLayout.insertStretch(1)
         self.buttonLayout.insertWidget(4, self.ignore_error_btn)
         self.buttonLayout.insertWidget(5, self.restart_btn)
+
+    def done(self, r: int) -> None:
+        global error_dialog
+        error_dialog = None
+        super().done(r)
 
     def copy_log(self) -> None:  # 复制日志
         QApplication.clipboard().setText(self.error_log.toPlainText())
@@ -940,6 +1022,8 @@ class PluginManager:  # 插件管理器
             "Widgets_Mgr": mgr,  # 组件管理器实例
             "Theme": theme,  # 当前主题
         }
+        if hasattr(self, 'method') and self.method:
+            self.method.app_contexts = self.cw_contexts
         return self.cw_contexts
 
 
@@ -993,11 +1077,14 @@ class PluginMethod:  # 插件方法
         w.show()
 
     @staticmethod
-    def read_config(path: str, section: str, option: str) -> Optional[Any]:  # 读取配置文件
+    def read_config(path: str, section: str, option: str) -> Optional[Any]:
         try:
             with open(path, encoding='utf-8') as r:
                 config = json.load(r)
-            return config.get(section, option)
+            section_data = config.get(section, {})
+            if isinstance(section_data, dict):
+                return section_data.get(option)
+            return None
         except Exception as e:
             logger.error(f"插件读取配置文件失败：{e}")
             return None
@@ -1093,16 +1180,17 @@ class WidgetsManager:
 
     def close_all_widgets(self) -> None:
         # 统一关闭所有组件
-        if hasattr(self, '_closing'):
+        if getattr(self, '_closing', False):
             return
         self._closing = True
-        for widget in self.widgets:
-            widget.close()  # 触发各个widget的closeEvent
+        try:
+            for widget in list(self.widgets):
+                widget.close()  # 触发各个widget的closeEvent
+        finally:
+            self._closing = False
 
     def check_widgets_exist(self) -> None:
-        for widget in self.widgets_list:
-            if widget not in list_.widget_width:
-                self.widgets_list.remove(widget)
+        self.widgets_list = [widget for widget in self.widgets_list if widget in list_.widget_width]
 
     @staticmethod
     def get_widget_width(path: str) -> int:
@@ -1187,9 +1275,9 @@ class WidgetsManager:
             widget.animate_hide(True)
 
     def show_windows(self) -> None:
-        if fw.animating:  # 避免动画Bug
+        if fw and fw.animating:  # 避免动画Bug
             return
-        if fw.isVisible():
+        if fw and fw.isVisible():
             fw.close()
         self.state = 1
         for widget in self.widgets:
@@ -1197,15 +1285,23 @@ class WidgetsManager:
 
     def clear_widgets(self) -> None:
         global fw, was_floating_mode
+
         if fw and fw.isVisible():
             fw.close()
             was_floating_mode = True
         else:
             was_floating_mode = False
-        for widget in self.widgets:
-            widget.animate_hide_opacity()
-        for widget in self.widgets:
-            self.widgets.remove(widget)
+
+        widgets_to_close = list(self.widgets)
+        self.widgets.clear()
+
+        for widget in widgets_to_close:
+            try:
+                widget.stop()
+            except Exception as e:
+                logger.error(f"鍏抽棴鏃х粍浠跺け璐? {e}")
+
+        self.cleanup_resources()
         init()
 
     def update_widgets(self) -> None:
@@ -1223,15 +1319,15 @@ class WidgetsManager:
 
     def decide_to_hide(self) -> None:
         if config_center.read_conf('General', 'hide_method') == '0':  # 正常
-            if fw.isVisible() and not fw.animating:
+            if fw and fw.isVisible() and not fw.animating:
                 fw.close()
             self.hide_windows()
         elif config_center.read_conf('General', 'hide_method') == '1':  # 单击即完全隐藏
-            if fw.isVisible() and not fw.animating:
+            if fw and fw.isVisible() and not fw.animating:
                 fw.close()
             self.full_hide_windows()
         elif config_center.read_conf('General', 'hide_method') == '2':  # 最小化为浮窗
-            if not fw.animating:
+            if fw and not fw.animating:
                 self.full_hide_windows()
                 fw.show()
                 if utils.focus_manager:
@@ -1241,6 +1337,8 @@ class WidgetsManager:
                             ctypes.c_void_p(int(w.winId())).value
                         ),
                     )
+            else:
+                self.full_hide_windows()
         else:
             self.hide_windows()
 
@@ -1258,7 +1356,7 @@ class WidgetsManager:
         widgets_to_clean = list(self.widgets)
         self.widgets.clear()
         for widget in widgets_to_clean:
-            widget_path = getattr(widget, 'path', self.tr('未知组件'))
+            widget_path = getattr(widget, 'path', '未知组件')
             try:
                 if hasattr(widget, 'weather_timer') and widget.weather_timer:
                     with contextlib.suppress(RuntimeError):
@@ -1273,20 +1371,26 @@ class WidgetsManager:
                                 widget.weather_thread.wait()
                     except RuntimeError:
                         pass
+
+                if hasattr(widget, 'reminder_thread') and widget.reminder_thread:
+                    try:
+                        if widget.reminder_thread.isRunning():
+                            widget.reminder_thread.quit()
+                            if not widget.reminder_thread.wait(500):
+                                logger.warning(f"组件 {widget_path} 的提醒线程未正常退出，强制终止")
+                                widget.reminder_thread.terminate()
+                                widget.reminder_thread.wait()
+                    except RuntimeError:
+                        pass
+
                 widget.deleteLater()
+
             except Exception as ex:
                 logger.error(f"清理组件 {widget_path} 时发生异常: {ex}")
 
     def stop(self) -> None:
-        if mgr:
-            mgr.cleanup_resources()
-        for widget in self.widgets:
-            widget.stop()
-        if self.animation:
-            self.animation.stop()
-        if self.opacity_animation:
-            self.opacity_animation.stop()
-        self.close()
+        self.close_all_widgets()
+        self.cleanup_resources()
 
 
 class openProgressDialog(QWidget):
@@ -1298,7 +1402,12 @@ class openProgressDialog(QWidget):
             | Qt.WindowType.WindowDoesNotAcceptFocus
             | Qt.Tool
         )
-        time = int(config_center.read_conf('Plugin', 'aguto_delay'))
+        delay_value = (
+            config_center.read_conf('Plugin', 'auto_delay')
+            or config_center.read_conf('Plugin', 'aguto_delay')
+            or '3'
+        )
+        time = int(delay_value)
         self.action = action
 
         screen_geometry = app.primaryScreen().availableGeometry()
@@ -1331,11 +1440,19 @@ class openProgressDialog(QWidget):
 
     def execute_action(self):
         self.timer.stop()
-        subprocess.Popen(self.action)
+        self.progress_timer.stop()
+        try:
+            if isinstance(self.action, (list, tuple)):
+                subprocess.Popen(self.action)
+            else:
+                subprocess.Popen(self.action, shell=isinstance(self.action, str))
+        except Exception as e:
+            logger.error(f'执行插件命令失败: {e}')
         self.close()
 
     def cancel_action(self):
         self.timer.stop()
+        self.progress_timer.stop()
         self.close()
 
     def save_position(self) -> None:
@@ -1462,7 +1579,15 @@ class FloatingWidget(QWidget):  # 浮窗
                 50,  # 居中横向  # 距离顶部 50px
             )
 
-        update_timer.add_callback(self.update_data)
+        self.update_callback_id = update_timer.add_callback(self.update_data)
+
+    def _remove_update_callback(self) -> None:
+        try:
+            if hasattr(self, 'update_callback_id') and self.update_callback_id:
+                update_timer.remove_callback_by_id(self.update_callback_id)
+                self.update_callback_id = None
+        except Exception as e:
+            logger.debug(f'移除浮窗更新回调失败: {e}')
 
     def adjust_position_to_screen(self, pos: QPoint) -> QPoint:
         screen = QApplication.screenAt(pos)
@@ -1670,37 +1795,46 @@ class FloatingWidget(QWidget):  # 浮窗
         self.activity_countdown.setStyleSheet(
             f"color: {time_color.name()}; background: transparent"
         )
-        if self.animating:  # 执行动画时跳过更新
+
+        if self.animating:
             return
+
         if platform.system() == 'Windows' and platform.release() != '7':
-            self.setWindowOpacity(
-                int(config_center.read_conf('General', 'opacity')) / 100
-            )  # 设置窗口透明度
+            self.setWindowOpacity(int(config_center.read_conf('General', 'opacity')) / 100)
         else:
             self.setWindowOpacity(1.0)
+
         cd_list = get_countdown()
-        self.text_changed = False
-        if self.current_lesson_name_text.text() != current_lesson_name:
-            self.text_changed = True
 
-        self.current_lesson_name_text.setText(current_lesson_name)
+        old_subject = self.current_lesson_name_text.text()
+        old_countdown = self.activity_countdown.text()
 
-        if cd_list:  # 模糊倒计时
+        new_subject = current_lesson_name
+
+        if cd_list:
             blur_floating = config_center.read_conf('General', 'blur_floating_countdown') == '1'
-            if blur_floating:  # 模糊显示
+            if blur_floating:
                 if cd_list[1] == '00:00':
-                    self.activity_countdown.setText(self.tr("< - 分钟"))
+                    new_countdown = self.tr("< - 分钟")
                 else:
                     minutes = int(cd_list[1].split(':')[0]) + 1
-                    self.activity_countdown.setText(
-                        self.tr("< {minutes} 分钟").format(minutes=minutes)
-                    )
-            else:  # 精确显示
-                self.activity_countdown.setText(cd_list[1])
-            if self.countdown_progress_bar is not None:  # 兼容小尺寸浮窗
-                self.countdown_progress_bar.setValue(cd_list[2])
+                    new_countdown = self.tr("< {minutes} 分钟").format(minutes=minutes)
+            else:
+                new_countdown = cd_list[1]
+        else:
+            new_countdown = ""
 
-        self.adjustSize_animation()
+        content_changed = (old_subject != new_subject) or (old_countdown != new_countdown)
+
+        self.current_lesson_name_text.setText(new_subject)
+        self.activity_countdown.setText(new_countdown)
+
+        if self.countdown_progress_bar is not None and cd_list:
+            self.countdown_progress_bar.setValue(cd_list[2])
+
+        self.text_changed = content_changed
+        if content_changed:
+            self.adjustSize_animation()
 
         self.update()
 
@@ -1747,6 +1881,8 @@ class FloatingWidget(QWidget):  # 浮窗
         self.animating = True
         self.animation.start()
         self.animation_rect.start()
+        with contextlib.suppress(TypeError):
+            self.animation_rect.finished.disconnect(self.animation_done)
         self.animation_rect.finished.connect(self.animation_done)
 
     def animation_done(self) -> None:
@@ -1800,10 +1936,11 @@ class FloatingWidget(QWidget):  # 浮窗
         duration = max(min_duration, min(duration, max_duration))
         # 多平台兼容
         curve = QEasingCurve.Type.OutCubic
-        if system == "Windows":
+        current_system = platform.system()
+        if current_system == "Windows":
             if current_pos.y() > screen_center_y:
                 duration += 50
-        elif system == "Darwin":
+        elif current_system == "Darwin":
             duration = int(duration * 0.85)
 
         self.animation = QPropertyAnimation(self, b"windowOpacity")
@@ -1865,34 +2002,33 @@ class FloatingWidget(QWidget):  # 浮窗
         self.animation.start()
         self.animation.finished.connect(self.animation_done)
         """
-        if self.countdown_progress_bar is not None:
-            # 原版UI（上下排列 + 进度环）
-            extra_width = 120
-            min_width = 200
-            label_width = self.current_lesson_name_text.sizeHint().width() + extra_width
-        else:
-            # 精简UI（左右排列，无进度环）
-            # 总宽度 = subject宽 + 间距(8) + countdown宽 + 左右内边距(12×2) + 左右外边距(6×2)
-            extra_width = 8 + 24 + 0  # spacing + padding + margin = 44
-            min_width = 0
-            label_width = (
-                    self.current_lesson_name_text.sizeHint().width()
-                    + self.activity_countdown.sizeHint().width()
-                    + extra_width
-            )
+        layout = self.layout()
+        if not layout:
+            return
 
-        self.setMinimumWidth(min_width)
+        target_width = layout.sizeHint().width()
         current_geometry = self.geometry()
-        offset = label_width - current_geometry.width()
-        target_geometry = current_geometry.adjusted(0, 0, offset, 0)
+
+        if target_width <= 0 or abs(target_width - current_geometry.width()) < 2:
+            return
+
+        target_geometry = QRect(
+            current_geometry.x(),
+            current_geometry.y(),
+            target_width,
+            current_geometry.height(),
+        )
+
         self.animation = QPropertyAnimation(self, b'geometry')
-        self.animation.setDuration(450)
+        self.animation.setDuration(250)
         self.animation.setStartValue(current_geometry)
         self.animation.setEndValue(target_geometry)
         self.animation.setEasingCurve(QEasingCurve.Type.InOutCirc)
         self.animating = True
         self.animation.start()
         self.animation.finished.connect(self.animation_done)
+
+
 
     def mousePressEvent(self, a0: QMouseEvent) -> None:
         if a0.button() == Qt.MouseButton.LeftButton:
@@ -1941,14 +2077,11 @@ class FloatingWidget(QWidget):  # 浮窗
         self.focusing = False
 
     def stop(self):
-        if mgr:
-            mgr.cleanup_resources()
-        for widget in self.widgets:
-            widget.stop()
+        self._remove_update_callback()
         if self.animation:
             self.animation.stop()
-        if self.opacity_animation:
-            self.opacity_animation.stop()
+        if self.animation_rect:
+            self.animation_rect.stop()
         self.close()
 
 
@@ -1965,6 +2098,7 @@ class DesktopWidget(QWidget):  # 主要小组件
         super().__init__()
         if not parent:
             raise ValueError("DesktopWidget parent 参数不能为空")
+        self.manager = parent
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowDoesNotAcceptFocus | Qt.Tool)
 
         self.cnt = cnt
@@ -2042,7 +2176,7 @@ class DesktopWidget(QWidget):  # 主要小组件
             self.blur_effect = QGraphicsBlurEffect()
             self.current_subject.mouseReleaseEvent = self.rightReleaseEvent
 
-            update_timer.add_callback(self.detect_theme_changed)
+            self.theme_callback_id = update_timer.add_callback(self.detect_theme_changed)
 
         elif path == 'widget-next-activity.ui':  # 接下来的活动
             self.nl_text = self.findChild(QLabel, 'next_lesson_text')
@@ -2115,7 +2249,7 @@ class DesktopWidget(QWidget):  # 主要小组件
                 interval=refresh_interval * 60,  # 转换为秒
             )
             self.get_weather_data()
-            update_timer.add_callback(self.detect_weather_code_changed)
+            self.weather_code_callback_id = update_timer.add_callback(self.detect_weather_code_changed)
 
         if hasattr(self, 'img'):  # 自定义图片主题兼容
             img = self.findChild(QLabel, 'img')
@@ -2239,11 +2373,11 @@ class DesktopWidget(QWidget):  # 主要小组件
             self.update()
             if pin_on_top == '2':  # 置底
                 self.show()
-                parent = self.parent()
-                if hasattr(parent, 'get_widget_pos'):
+                parent = getattr(self, 'manager', None)
+                if parent and hasattr(parent, 'get_widget_pos'):
                     if hasattr(parent, 'get_start_pos'):
                         parent.get_start_pos()
-                    pos = parent.get_widget_pos(self.path, None)
+                    pos = parent.get_widget_pos(self.path, self.widget_cnt)
                     if pos:
                         self.move(pos[0], pos[1])
                 if self.width() == 0 or self.height() == 0:
@@ -2253,11 +2387,11 @@ class DesktopWidget(QWidget):  # 主要小组件
                 if current_geometry is not None and current_geometry.isValid():
                     self.setGeometry(current_geometry)
                 else:
-                    parent = self.parent()
-                    if hasattr(parent, 'get_widget_pos'):
+                    parent = getattr(self, 'manager', None)
+                    if parent and hasattr(parent, 'get_widget_pos'):
                         if hasattr(parent, 'get_start_pos'):
                             parent.get_start_pos()
-                        pos = parent.get_widget_pos(self.path, None)
+                        pos = parent.get_widget_pos(self.path, self.widget_cnt)
                         if pos:
                             self.move(pos[0], pos[1])
                 self.raise_()
@@ -2391,20 +2525,6 @@ class DesktopWidget(QWidget):  # 主要小组件
                 logger.error(f"关闭窗口时移除置顶回调出错: {e}")
         super().closeEvent(a0)
 
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-
-        # 添加阴影效果
-        if conf.load_theme_config(
-            str('default' if theme is None else theme)
-        ).config.shadow:  # 修改阴影问题
-            shadow_effect = QGraphicsDropShadowEffect(self)
-            shadow_effect.setBlurRadius(18)
-            shadow_effect.setXOffset(0)
-            shadow_effect.setYOffset(4)
-            shadow_effect.setColor(QColor(0, 0, 0, 75))
-
-            self.backgnd.setGraphicsEffect(shadow_effect)
-
         if utils.focus_manager:
             QTimer.singleShot(
                 500,
@@ -2437,6 +2557,7 @@ class DesktopWidget(QWidget):  # 主要小组件
         self.animation.setEasingCurve(QEasingCurve.Type.OutBack)
         self.raise_()
         self.show()
+        self.animation.start()
 
     def init_tray_menu(self) -> None:
         if not first_start:
@@ -2504,6 +2625,12 @@ class DesktopWidget(QWidget):  # 主要小组件
 
         today = TimeManagerFactory.get_instance().get_today()
         current_time = TimeManagerFactory.get_instance().get_current_time_str('%H:%M:%S')
+
+        if conf.is_temp_week():
+            current_week = config_center.read_conf('Temp', 'set_week')
+        else:
+            current_week = TimeManagerFactory.get_instance().get_current_weekday()
+
         get_start_time()
         get_current_lessons()
         get_current_lesson_name()
@@ -2702,16 +2829,11 @@ class DesktopWidget(QWidget):  # 主要小组件
 
         if current_key_config != self.last_code:
             last_api = self.last_code.split('|')[0] if '|' in self.last_code else ''
+            self.last_code = current_key_config
             if current_api != last_api:
-                # logger.debug(f'检测到天气API变化: {last_api} -> {current_api}，等待城市代码稳定')
-                self.last_code = current_key_config
                 from weather import on_weather_api_changed
-
                 on_weather_api_changed(current_api)
-            else:
-                # logger.debug(f'检测到城市配置变化: {self.last_code} -> {current_key_config}')
-                self.last_code = current_key_config
-                self.get_weather_data()
+            self.get_weather_data()
 
     def toggle_weather_alert(self) -> None:
         """按照配置顺序循环显示天气信息"""
@@ -2886,8 +3008,8 @@ class DesktopWidget(QWidget):  # 主要小组件
                     fade_out_group.addAnimation(reminder_icon_fade_out)
         except RuntimeError as e:
             logger.warning(f'创建提醒淡出动画失败: {e}')
-            if hasattr(self, 'reminder_text'):
-                self.reminder_text.hide()
+            if hasattr(self, 'weather_reminder_text'):
+                self.weather_reminder_text.hide()
             if hasattr(self, 'reminder_icon'):
                 self.reminder_icon.hide()
 
@@ -3306,7 +3428,7 @@ class DesktopWidget(QWidget):  # 主要小组件
         self,
         weather_data: Dict[str, Dict[str, Any]],  # type: ignore
     ) -> None:  # 更新天气数据(已兼容多api)
-        global weather_name, temperature, weather_data_temp
+        global weather_name, temperature, weather_data_temp, weather_icon
         if (
             type(weather_data) is dict
             and hasattr(self, 'weather_icon')
@@ -3346,7 +3468,9 @@ class DesktopWidget(QWidget):  # 主要小组件
                 self.current_reminders = []
                 self.current_reminder_index = 0
 
-            weather_name = db.get_weather_by_code(db.get_weather_data('icon', weather_data))
+            icon_code = db.get_weather_data('icon', weather_data)
+            weather_icon = icon_code
+            weather_name = db.get_weather_by_code(icon_code)
             temp_data = db.get_weather_data('temp', weather_data)
             if temp_data and temp_data.lower() != 'none':
                 temperature = db.weather_processor.convert_temperature_unit(temp_data)
@@ -3366,52 +3490,53 @@ class DesktopWidget(QWidget):  # 主要小组件
                     self.temperature.setText(converted_temp)
                 else:
                     self.temperature.setText(f'--{get_default_temperature_unit()}')
-                location_key = config_center.read_conf('Weather', 'city')
-                city_name = db.search_by_num(location_key)
-                if city_name != 'coordinates':
-                    font_metrics = current_city.fontMetrics()
-                    text_full = f"{city_name} · {weather_name}"
-                    full_width = font_metrics.horizontalAdvance(text_full)
-                    max_width = current_city.width()
-                    if full_width > max_width:
-                        current_city.setText(weather_name)
+                if current_city:
+                    location_key = config_center.read_conf('Weather', 'city')
+                    city_name = db.search_by_num(location_key)
+                    if city_name != 'coordinates':
+                        font_metrics = current_city.fontMetrics()
+                        text_full = f"{city_name} · {weather_name}"
+                        full_width = font_metrics.horizontalAdvance(text_full)
+                        max_width = current_city.width()
+                        if full_width > max_width:
+                            current_city.setText(weather_name)
+                        else:
+                            current_city.setText(text_full)
                     else:
-                        current_city.setText(text_full)
-                else:
-                    current_city.setText(f'{weather_name}')
-                    if ',' in location_key:
-                        try:
-                            lon, lat = location_key.split(',')
-                            if lat and lon:
-                                if not hasattr(self, '_city_threads'):
-                                    self._city_threads = []
-                                city_thread = getCity('city_from_coordinates')
-                                city_thread.set_coordinates(lat, lon)
+                        current_city.setText(f'{weather_name}')
+                        if ',' in location_key:
+                            try:
+                                lon, lat = location_key.split(',')
+                                if lat and lon:
+                                    if not hasattr(self, '_city_threads'):
+                                        self._city_threads = []
+                                    city_thread = getCity('city_from_coordinates')
+                                    city_thread.set_coordinates(lat, lon)
 
-                                def update_city_name(name, key):
-                                    if name:
-                                        font_metrics = current_city.fontMetrics()
-                                        text_full = f"{name} · {weather_name}"
-                                        full_width = font_metrics.horizontalAdvance(text_full)
-                                        max_width = current_city.width()
-                                        if full_width > max_width:
-                                            current_city.setText(weather_name)
-                                        else:
-                                            current_city.setText(text_full)
+                                    def update_city_name(name, key):
+                                        if name and current_city:
+                                            font_metrics = current_city.fontMetrics()
+                                            text_full = f"{name} · {weather_name}"
+                                            full_width = font_metrics.horizontalAdvance(text_full)
+                                            max_width = current_city.width()
+                                            if full_width > max_width:
+                                                current_city.setText(weather_name)
+                                            else:
+                                                current_city.setText(text_full)
 
-                                def cleanup_thread():
-                                    if (
-                                        hasattr(self, '_city_threads')
-                                        and city_thread in self._city_threads
-                                    ):
-                                        self._city_threads.remove(city_thread)
+                                    def cleanup_thread():
+                                        if (
+                                                hasattr(self, '_city_threads')
+                                                and city_thread in self._city_threads
+                                        ):
+                                            self._city_threads.remove(city_thread)
 
-                                city_thread.city_info_signal.connect(update_city_name)
-                                city_thread.finished_signal.connect(cleanup_thread)
-                                city_thread.start()
-                                self._city_threads.append(city_thread)
-                        except Exception as e:
-                            logger.error(f"获取城市名称失败: {e}")
+                                    city_thread.city_info_signal.connect(update_city_name)
+                                    city_thread.finished_signal.connect(cleanup_thread)
+                                    city_thread.start()
+                                    self._city_threads.append(city_thread)
+                            except Exception as e:
+                                logger.error(f"获取城市名称失败: {e}")
                 icon_code = db.get_weather_data('icon', weather_data)
                 path = db.get_weather_stylesheet(icon_code).replace('\\', '/')
                 update_stylesheet = re.sub(
@@ -3687,10 +3812,6 @@ class DesktopWidget(QWidget):  # 主要小组件
             utils.focus_manager.restore_requested.emit()
 
     def stop(self):
-        if mgr:
-            mgr.cleanup_resources()
-        for widget in self.widgets:
-            widget.stop()
         if self.animation:
             self.animation.stop()
         if self.opacity_animation:
@@ -3809,11 +3930,12 @@ def init() -> None:
     fw = FloatingWidget()
 
     widgets = list_.get_widget_config()
-
+    widgets = [widget for widget in widgets if widget in list_.widget_name]
+    """
     for widget in widgets:  # 检查组件
         if widget not in list_.widget_name:
             widgets.remove(widget)  # 移除不存在的组件(确保移除插件后不会出错)
-
+    """
     mgr.init_widgets()
     if not first_start and was_floating_mode and fw:
         fw.show()
@@ -3847,6 +3969,45 @@ def init() -> None:
 
     first_start = False
 
+def switch_to_floating_on_startup() -> None:
+    """启动时检测是否上课，如果正在上课则切换到浮窗"""
+    global mgr, fw, current_state
+
+    if mgr is None or fw is None:
+        logger.warning('启动切换浮窗时，mgr 或 fw 尚未初始化，跳过处理')
+        return
+
+    # 先确保当前课程状态已经更新
+    get_start_time()
+    get_current_lessons()
+    get_current_lesson_name()
+    get_next_lessons()
+
+    # current_state == 1 表示上课中
+    if current_state == 1:
+        logger.info('启动时检测到当前正在上课，切换为浮窗模式')
+
+        mgr.state = 0
+        mgr.hide_status = (current_state, 1)
+
+        mgr.full_hide_windows()
+
+        try:
+            fw.update_data()
+        except Exception as e:
+            logger.debug(f'启动时更新浮窗内容失败: {e}')
+
+        if not fw.isVisible():
+            fw.show()
+            if utils.focus_manager:
+                QTimer.singleShot(
+                    0,
+                    lambda w=fw: utils.focus_manager.ignore.emit(
+                        ctypes.c_void_p(int(w.winId())).value
+                    ),
+                )
+    else:
+        logger.info('启动时未检测到上课，保持普通组件模式')
 
 def setup_signal_handlers_optimized() -> None:
     """退出信号处理器"""
@@ -3862,6 +4023,17 @@ def setup_signal_handlers_optimized() -> None:
         signal.signal(signal.SIGQUIT, signal_handler)  # 终端退出
         signal.signal(signal.SIGHUP, signal_handler)  # 终端挂起
 
+
+"""以下函数使用人工智能添加"""
+def get_part_index(part_id: Union[int, str]) -> int:
+    part_id = str(part_id)
+    try:
+        return order.index(part_id)
+    except ValueError:
+        return -1
+
+def is_time_reached(now: dt.datetime, target: dt.datetime, tolerance_seconds: int = 1) -> bool:
+    return 0 <= (now - target).total_seconds() < tolerance_seconds
 
 if __name__ == '__main__':
     utils.guard = utils.SingleInstanceGuard("ClassWidgets")
@@ -3991,10 +4163,7 @@ if __name__ == '__main__':
 
     splash_window.update_status((50, QCoreApplication.translate('main', '初始化窗口管理器...')))
 
-    mgr = WidgetsManager()
-    app.aboutToQuit.connect(mgr.cleanup_resources)
     setup_signal_handlers_optimized()
-    utils.main_mgr = mgr
 
     splash_window.update_status((55, QCoreApplication.translate('main', '检查初次启动...')))
 
@@ -4060,34 +4229,16 @@ if __name__ == '__main__':
     '''
     hide_mode = config_center.read_conf('General', 'hide')
 
-    # 你的需求：启动时，如果是“上课时隐藏”且当前正在上课 => 只显示浮窗
+    #如果是“上课时隐藏”且当前正在上课 => 只显示浮窗
     if hide_mode == '1' and current_state == 1:
-        mgr.state = 0  # 标记为隐藏态，避免后续update_data重复触发隐藏逻辑
-
-        # 直接隐藏所有组件，避免与浮窗同时显示
-        for widget in mgr.widgets:
-            widget.hide()
-            with contextlib.suppress(Exception):
-                widget.setWindowOpacity(0)
-
-        # 只显示浮窗
-        if not fw.isVisible():
-            fw.show()
-            if utils.focus_manager:
-                QTimer.singleShot(
-                    0,
-                    lambda w=fw: utils.focus_manager.ignore.emit(
-                        ctypes.c_void_p(int(w.winId())).value
-                    ),
-                )
+        switch_to_floating_on_startup()
     else:
-        # 保持原有逻辑
         should_hide = False
-        if hide_mode == '1':  # 上课自动隐藏
+        if hide_mode == '1':
             should_hide = current_state == 1
-        elif hide_mode == '2':  # 全屏自动隐藏
+        elif hide_mode == '2':
             should_hide = check_windows_maximize() or check_fullscreen()
-        elif hide_mode == '3':  # 灵活隐藏
+        elif hide_mode == '3':
             should_hide = current_state == 1
 
         if should_hide:
@@ -4114,3 +4265,4 @@ if __name__ == '__main__':
     status = app.exec()
 
     utils.stop(status)
+

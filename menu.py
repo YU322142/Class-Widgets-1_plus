@@ -1662,7 +1662,12 @@ class SettingsMenu(FluentWindow):
 
             temp_data = wd.get_weather_data('temp', weather_data)
             if self.current_temperature and temp_data and temp_data.lower() != 'none':
-                self.current_temperature.setText(temp_data)
+                try:
+                    converted_temp = wd.weather_processor.convert_temperature_unit(temp_data)
+                    self.current_temperature.setText(converted_temp)
+                except Exception as e:
+                    logger.warning(f"转换当前温度单位失败: {e}")
+                    self.current_temperature.setText(temp_data)
             elif self.current_temperature:
                 default_unit = config_center.read_conf('Weather', 'temperature_unit', '℃')
                 self.current_temperature.setText(f'--{default_unit}')
@@ -1673,16 +1678,23 @@ class SettingsMenu(FluentWindow):
                     self.weather_description.setText(description)
             feels_like_data = wd.get_weather_data('feels_like', weather_data)
             if (
-                self.feels_like_temperature
-                and feels_like_data
-                and feels_like_data.lower() != 'none'
+                    self.feels_like_temperature
+                    and feels_like_data
+                    and feels_like_data.lower() != 'none'
             ):
-                self.feels_like_temperature.setText(
-                    self.tr("体感温度: {feels_like_data}").format(feels_like_data=feels_like_data)
-                )
+                try:
+                    converted_feels_like = wd.weather_processor.convert_temperature_unit(feels_like_data)
+                    self.feels_like_temperature.setText(
+                        self.tr("体感温度: {feels_like_data}").format(feels_like_data=converted_feels_like)
+                    )
+                except Exception as e:
+                    logger.warning(f"转换体感温度单位失败: {e}")
+                    self.feels_like_temperature.setText(
+                        self.tr("体感温度: {feels_like_data}").format(feels_like_data=feels_like_data)
+                    )
             elif self.feels_like_temperature:
                 default_unit = config_center.read_conf('Weather', 'temperature_unit', '℃')
-                self.feels_like_temperature.setText(self.tr(f"体感温度: --{default_unit}"))
+                self.feels_like_temperature.setText(self.tr("体感温度: --{unit}").format(unit=default_unit))
             if self.weather_icon_label and icon_code:
                 icon_data = wd.get_weather_icon_by_code(icon_code)
                 self._update_weather_icon(icon_data)
@@ -2046,10 +2058,13 @@ class SettingsMenu(FluentWindow):
     def update_plugin_count(self):
         """更新计数显示"""
         total_count = len(plugin_dict)
-        enabled_count = len([p for p in plugin_dict if plugin_dict[p]['name'] in enabled_plugins])
+        enabled_list = enabled_plugins.get('enabled_plugins', [])
+        enabled_count = len([p for p in plugin_dict if p in enabled_list])
+
         self.plugin_count_label.setText(
             self.tr('已安装 {total_count} 个插件，已启用 {enabled_count} 个').format(
-                total_count=total_count, enabled_count=enabled_count
+                total_count=total_count,
+                enabled_count=enabled_count
             )
         )
 
@@ -2143,7 +2158,7 @@ class SettingsMenu(FluentWindow):
             plugin_name = plugin_info.get('name', self.tr('未知插件'))
             json_file_path = Path(raw_json_file_path)
             source_dir = json_file_path.parent
-            plugin_dir_name = json_file_path.name
+            plugin_dir_name = Path(zip_file_path).stem
             target_dir = PLUGIN_HOME / plugin_dir_name
             if target_dir.exists():
                 reply = MessageBox(
