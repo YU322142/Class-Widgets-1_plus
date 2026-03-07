@@ -64,8 +64,8 @@ border-radius: 8px</string>
        <widget class="QLabel" name="subject">
         <property name="font">
          <font>
-          <family>Microsoft YaHei UI</family>
-          <pointsize>15</pointsize>
+          <family>HarmonyOS_Sans_SC_Bold</family>
+          <pointsize>17</pointsize>
           <weight>75</weight>
           <bold>true</bold>
          </font>
@@ -83,8 +83,8 @@ font-weight: bold</string>
        <widget class="QLabel" name="activity_countdown">
         <property name="font">
          <font>
-          <family>Microsoft YaHei UI</family>
-          <pointsize>12</pointsize>
+          <family>HarmonyOS_Sans_SC_Bold</family>
+          <pointsize>17</pointsize>
           <weight>35</weight>
           <bold>true</bold>
          </font>
