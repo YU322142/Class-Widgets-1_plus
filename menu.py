@@ -121,6 +121,8 @@ from generate_speech import (
 from network_thread import VersionThread, getCity, scheduleThread
 from plugin import p_loader
 from plugin_plaza import PluginPlaza
+from automation_ui.automation_page import AutomationSettingsPage
+from automation_ui.runtime_adapter import build_editor_runtime
 
 
 class I18nManager:
@@ -1214,6 +1216,19 @@ class TTSPreviewThread(QThread):
             logger.error(f"TTS预览生成失败: {e!s}")
             self.previewError.emit(str(e))
 
+def _get_automation_runtime_from_main():
+    """
+    从主入口模块 __main__ 中拿已经初始化好的 automation_runtime。
+    避免在设置页里再创建第二套 runtime。
+    """
+    try:
+        main_mod = sys.modules.get('__main__')
+        if main_mod is None:
+            return None
+        return getattr(main_mod, 'automation_runtime', None)
+    except Exception:
+        return None
+
 
 class SettingsMenu(FluentWindow):
     closed = pyqtSignal()
@@ -1254,7 +1269,14 @@ class SettingsMenu(FluentWindow):
         self.plInterface.setObjectName("plInterface")
         self.wtInterface = uic.loadUi(str(CW_HOME / 'view/menu/weather.ui'))  # 天气
         self.wtInterface.setObjectName("wtInterface")
+
+        # 自动化页面（不走 .ui，直接使用自定义 QWidget）
+        self.automation_runtime = build_editor_runtime(conf, _get_automation_runtime_from_main())
+        self.amInterface = AutomationSettingsPage(self.automation_runtime, conf)
+        self.amInterface.setObjectName("amInterface")
+
         self.version_number_label = self.ifInterface.findChild(QLabel, 'version_number_label')
+
         self.build_commit_label = self.ifInterface.findChild(QLabel, 'build_commit_label')
         self.build_uuid_label = self.ifInterface.findChild(QLabel, 'build_uuid_label')
         self.build_date_label = self.ifInterface.findChild(QLabel, 'build_date_label')
@@ -6213,6 +6235,9 @@ class SettingsMenu(FluentWindow):
         )
         self.addSubInterface(
             self.sdInterface, fIcon.RINGER, self.tr('提醒'), NavigationItemPosition.BOTTOM
+        )
+        self.addSubInterface(
+            self.amInterface, fIcon.APPLICATION, self.tr('自动化'), NavigationItemPosition.BOTTOM
         )
         self.addSubInterface(
             self.adInterface, fIcon.SETTING, self.tr('高级选项'), NavigationItemPosition.BOTTOM

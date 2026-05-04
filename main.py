@@ -28,7 +28,10 @@ from PyQt5.QtCore import (
     Qt,
     QTimer,
     QUrl,
+    QObject,
+    pyqtSignal,
 )
+
 from PyQt5.QtGui import (
     QCloseEvent,
     QColor,
@@ -57,6 +60,7 @@ from PyQt5.QtWidgets import (
     QSystemTrayIcon,
     QWidget,
 )
+
 from qfluentwidgets import (
     Action,
     CheckBox,
@@ -102,6 +106,12 @@ from utils import DarkModeWatcher, TimeManagerFactory, restart, stop, update_tim
 from weather import WeatherReportThread as weatherReportThread
 from weather import weather_manager
 
+from automation.bootstrap import AutomationRuntime
+from automation.lifecycle_bus import ApplicationLifetime
+from automation.notification_host import NotificationHost
+from automation.notification_runtime import NotificationRequest
+
+
 if os.name == 'nt':
     import pygetwindow
 
@@ -110,6 +120,9 @@ today = dt.date.today()
 mgr = None
 fw = None
 system = platform.system()
+automation_runtime = None
+automation_notification_consumer = None
+automation_ui_bridge = None
 
 # 存储窗口对象
 windows = []
@@ -748,6 +761,135 @@ def get_current_lesson_name() -> None:
                             current_lesson_name = QCoreApplication.translate('main', '课间')
                             current_state = 0
                         return
+def sync_automation_tray_menu() -> None:
+    global automation_runtime
+
+    if automation_runtime is None:
+        return
+
+    if not hasattr(utils, 'tray_icon') or utils.tray_icon is None:
+        return
+
+    tray_menu_owner = None
+    for widget in mgr.widgets if mgr else []:
+        if hasattr(widget, 'tray_menu') and widget.tray_menu is not None:
+            tray_menu_owner = widget
+            break
+
+    if tray_menu_owner is None or tray_menu_owner.tray_menu is None:
+        return
+
+    tray_menu = tray_menu_owner.tray_menu
+    tray_bus = automation_runtime.tray_bus
+
+    # ---------------------------------------------------------
+    # 删除旧的 automation action
+    # 不删除原生菜单项，不新增 separator
+    # ---------------------------------------------------------
+    old_actions = getattr(tray_menu_owner, '_automation_actions', [])
+    for action in list(old_actions):
+        try:
+            tray_menu.removeAction(action)
+        except Exception:
+            pass
+    tray_menu_owner._automation_actions = []
+
+    items = list(tray_bus.Items.values())
+    if not items:
+        return
+
+    insert_before = getattr(tray_menu_owner, '_automation_insert_before', None)
+
+    # 如果锚点不存在，就退化为直接追加，但仍然不加 separator
+    if insert_before is None:
+        for item in items:
+            action = Action(item.Header, triggered=item.Callback)
+            setattr(action, '_cw_automation_action', True)
+            tray_menu.addAction(action)
+            tray_menu_owner._automation_actions.append(action)
+        return
+
+    # 插到“重新启动”前面，不新增任何 separator
+    for item in items:
+        action = Action(item.Header, triggered=item.Callback)
+        setattr(action, '_cw_automation_action', True)
+        tray_menu.insertAction(insert_before, action)
+        tray_menu_owner._automation_actions.append(action)
+
+
+
+def _normalize_tray_menu_separators(tray_menu) -> None:
+    """
+    清理多余横线：
+    - 删除开头 separator
+    - 删除连续 separator
+    - 删除结尾 separator
+    """
+    try:
+        actions = list(tray_menu.actions())
+
+        prev_is_sep = True
+        for action in actions:
+            is_sep = False
+            try:
+                is_sep = action.isSeparator()
+            except Exception:
+                is_sep = False
+
+            if is_sep and prev_is_sep:
+                tray_menu.removeAction(action)
+                continue
+
+            prev_is_sep = is_sep
+
+        actions = list(tray_menu.actions())
+        if actions:
+            last = actions[-1]
+            try:
+                if last.isSeparator():
+                    tray_menu.removeAction(last)
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug(f'整理托盘菜单分隔线失败: {e}')
+
+
+
+def push_lessons_state_to_automation() -> None:
+    global automation_runtime
+
+    if automation_runtime is None:
+        return
+
+    bridge = automation_runtime.lessons_bridge
+    if bridge is None:
+        return
+
+    try:
+        get_start_time()
+        get_current_lessons()
+        get_current_lesson_name()
+        get_next_lessons()
+
+        bridge._emit(bridge._pre_main_timer_ticked_handlers)
+
+        from automation.enums import TimeState
+
+        if current_state == 1:
+            new_state = TimeState.OnClass
+        elif current_state == 0:
+            new_state = TimeState.Breaking
+        else:
+            new_state = TimeState.None_
+
+        bridge.UpdateCurrentState(new_state)
+
+        bridge.CurrentSubject = current_lesson_name
+        bridge.NextClassSubject = next_lessons[0] if next_lessons else None
+
+        bridge._emit(bridge._post_main_timer_ticked_handlers)
+    except Exception as e:
+        logger.error(f'同步课程状态到 automation 失败: {e}')
 
 
 def get_hide_status() -> int:
@@ -1320,6 +1462,7 @@ class WidgetsManager:
         for widget in self.widgets:
             if c == 0:
                 get_countdown(True)
+                push_lessons_state_to_automation()
             widget.update_data(path=widget.path)
             c += 1
 
@@ -2671,8 +2814,17 @@ class DesktopWidget(QWidget):  # 主要小组件
             ]
         )
         self.tray_menu.addSeparator()
-        self.tray_menu.addAction(Action(fIcon.SYNC, self.tr('重新启动'), triggered=restart))
-        self.tray_menu.addAction(Action(fIcon.CLOSE, self.tr('退出'), triggered=stop))
+
+        restart_action = Action(fIcon.SYNC, self.tr('重新启动'), triggered=restart)
+        exit_action = Action(fIcon.CLOSE, self.tr('退出'), triggered=stop)
+
+        self.tray_menu.addAction(restart_action)
+        self.tray_menu.addAction(exit_action)
+
+        # 记录 automation 菜单插入锚点：始终插在“重新启动”前面
+        self._automation_insert_before = restart_action
+        self._automation_actions = []
+
         utils.tray_icon.setContextMenu(self.tray_menu)
 
         utils.tray_icon.activated.connect(self.on_tray_icon_clicked)
@@ -4003,6 +4155,298 @@ def init_config() -> None:  # 重设配置文件
         copy(SCHEDULE_DIR / "backup.json", SCHEDULE_DIR / str(config_center.schedule_name))
         config_center.write_conf('Temp', 'temp_schedule', '')
 
+class AutomationSettingsAdapter:
+    """
+    把你当前项目的配置系统包装成 automation 兼容 settings 对象。
+    这里只放自动化真正需要的字段。
+    """
+    def __init__(self) -> None:
+        state = conf.load_automation_state()
+        self.CurrentAutomationConfig = state.get("CurrentAutomationConfig", "Default")
+        self.IsAutomationEnabled = state.get("IsAutomationEnabled", True)
+        self.SettingsOverlays = {}
+
+    def sync_to_disk(self) -> None:
+        conf.save_automation_state({
+            "CurrentAutomationConfig": self.CurrentAutomationConfig,
+            "IsAutomationEnabled": self.IsAutomationEnabled,
+        })
+class _AutomationNotificationBridge(QObject):
+    show_request = pyqtSignal(object)
+
+
+class AutomationUiBridge(QObject):
+    weather_forecast_requested = pyqtSignal()
+    weather_alerts_requested = pyqtSignal()
+    weather_hourly_requested = pyqtSignal()
+
+    open_url_requested = pyqtSignal(str)
+
+    app_quit_requested = pyqtSignal()
+    app_restart_requested = pyqtSignal(bool)
+
+
+def _show_weather_forecast_on_main_thread() -> None:
+    try:
+        # 优先找 main.py 里已有的 weather_manager
+        if 'weather_manager' in globals():
+            mgr_ = globals().get('weather_manager')
+            if mgr_ is not None and hasattr(mgr_, 'show_weather_forecast_notification'):
+                mgr_.show_weather_forecast_notification()
+                return
+
+        # 其次找 weather 模块内的 weather_manager
+        if hasattr(db, 'weather_manager') and db.weather_manager is not None:
+            mgr_ = db.weather_manager
+            if hasattr(mgr_, 'show_weather_forecast_notification'):
+                mgr_.show_weather_forecast_notification()
+                return
+
+        # 最后退化成普通通知
+        tip_toast.push_notification(
+            state=4,
+            title='天气预报',
+            content='三天天气预报',
+            duration=5000,
+        )
+    except Exception as e:
+        logger.error(f'显示天气预报失败: {e}')
+
+
+def _show_weather_alerts_on_main_thread() -> None:
+    try:
+        if 'weather_manager' in globals():
+            mgr_ = globals().get('weather_manager')
+            if mgr_ is not None and hasattr(mgr_, 'show_alert_notification'):
+                mgr_.show_alert_notification()
+                return
+
+        if hasattr(db, 'weather_manager') and db.weather_manager is not None:
+            mgr_ = db.weather_manager
+            if hasattr(mgr_, 'show_alert_notification'):
+                mgr_.show_alert_notification()
+                return
+
+        tip_toast.push_notification(
+            state=4,
+            title='天气预警',
+            content='当前有天气预警，请注意防范。',
+            duration=6000,
+        )
+    except Exception as e:
+        logger.error(f'显示天气预警失败: {e}')
+
+
+def _show_weather_hourly_on_main_thread() -> None:
+    try:
+        if 'weather_manager' in globals():
+            mgr_ = globals().get('weather_manager')
+            if mgr_ is not None and hasattr(mgr_, 'show_weather_hourly_notification'):
+                mgr_.show_weather_hourly_notification()
+                return
+
+        if hasattr(db, 'weather_manager') and db.weather_manager is not None:
+            mgr_ = db.weather_manager
+            if hasattr(mgr_, 'show_weather_hourly_notification'):
+                mgr_.show_weather_hourly_notification()
+                return
+
+        tip_toast.push_notification(
+            state=4,
+            title='逐小时天气',
+            content='接下来数小时天气趋势',
+            duration=5000,
+        )
+    except Exception as e:
+        logger.error(f'显示逐小时天气失败: {e}')
+
+
+def _open_url_on_main_thread(url: str) -> None:
+    try:
+        QDesktopServices.openUrl(QUrl(url))
+    except Exception as e:
+        logger.error(f'打开 URL 失败: {url}, {e}')
+
+
+def _app_quit_on_main_thread() -> None:
+    try:
+        utils.stop(0)
+    except Exception as e:
+        logger.error(f'退出应用失败: {e}')
+
+
+def _app_restart_on_main_thread(quiet: bool) -> None:
+    try:
+        # 如果你的 restart 支持 quiet 参数，就传；否则回退为无参
+        try:
+            restart(quiet)
+        except TypeError:
+            restart()
+    except Exception as e:
+        logger.error(f'重启应用失败: {e}')
+
+
+def ensure_automation_ui_bridge():
+    global automation_ui_bridge
+
+    if automation_ui_bridge is not None:
+        return automation_ui_bridge
+
+    automation_ui_bridge = AutomationUiBridge()
+
+    automation_ui_bridge.weather_forecast_requested.connect(
+        _show_weather_forecast_on_main_thread,
+        type=Qt.QueuedConnection,
+    )
+    automation_ui_bridge.weather_alerts_requested.connect(
+        _show_weather_alerts_on_main_thread,
+        type=Qt.QueuedConnection,
+    )
+    automation_ui_bridge.weather_hourly_requested.connect(
+        _show_weather_hourly_on_main_thread,
+        type=Qt.QueuedConnection,
+    )
+
+    automation_ui_bridge.open_url_requested.connect(
+        _open_url_on_main_thread,
+        type=Qt.QueuedConnection,
+    )
+
+    automation_ui_bridge.app_quit_requested.connect(
+        _app_quit_on_main_thread,
+        type=Qt.QueuedConnection,
+    )
+    automation_ui_bridge.app_restart_requested.connect(
+        _app_restart_on_main_thread,
+        type=Qt.QueuedConnection,
+    )
+
+    return automation_ui_bridge
+
+
+class TipToastNotificationConsumer:
+    """
+    将 automation NotificationHost 桥接到现有 tip_toast.push_notification。
+    通过 Qt signal 保证真正显示发生在主线程。
+    """
+    def __init__(self) -> None:
+        self.AcceptsNotificationRequests = True
+        self.QueuedNotificationCount = 0
+
+        self._bridge = _AutomationNotificationBridge()
+        self._bridge.show_request.connect(self._show_request_on_main_thread)
+
+    def ReceiveNotifications(self, notification_requests):
+        for request in notification_requests:
+            self.QueuedNotificationCount += 1
+            self._bridge.show_request.emit(request)
+
+    def _show_request_on_main_thread(self, request):
+        try:
+            mask = request.MaskContent
+            overlay = request.OverlayContent
+
+            title = None
+            content = None
+
+            if isinstance(mask.Content, dict) and mask.Content.get("type") == "two_icons_mask":
+                title = mask.Content.get("text")
+
+            if overlay is not None:
+                if isinstance(overlay.Content, dict):
+                    if overlay.Content.get("type") == "simple_text":
+                        content = overlay.Content.get("text")
+                    elif overlay.Content.get("type") == "rolling_text":
+                        content = overlay.Content.get("text")
+                elif hasattr(overlay.Content, "Alert"):
+                    content = getattr(getattr(overlay.Content, "Alert", None), "Detail", None)
+
+            if title is None:
+                title = "自动化提醒"
+            if content is None:
+                content = ""
+
+            duration = 2000
+            if overlay is not None and getattr(overlay, "Duration", None):
+                try:
+                    duration = max(500, int(overlay.Duration.total_seconds() * 1000))
+                except Exception:
+                    pass
+            elif getattr(mask, "Duration", None):
+                try:
+                    duration = max(500, int(mask.Duration.total_seconds() * 1000))
+                except Exception:
+                    pass
+
+            tip_toast.push_notification(
+                state=4,
+                title=title,
+                content=content,
+                duration=duration,
+            )
+        finally:
+            try:
+                request.CompletedTokenSource.cancel()
+            except Exception:
+                pass
+            self.QueuedNotificationCount = max(0, self.QueuedNotificationCount - 1)
+
+
+
+def build_automation_runtime() -> AutomationRuntime:
+    settings_adapter = AutomationSettingsAdapter()
+    runtime = AutomationRuntime(
+        settings=settings_adapter,
+        logger=logger,
+        notification_host=NotificationHost(),
+    )
+
+    ui_bridge = ensure_automation_ui_bridge()
+
+    # 应用退出 / 重启：切回主线程
+    runtime.context.app_quit = lambda: ui_bridge.app_quit_requested.emit()
+    runtime.context.app_restart = lambda quiet=False: ui_bridge.app_restart_requested.emit(bool(quiet))
+
+    # run action hooks
+    runtime.context.open_application = lambda path, args: subprocess.Popen(
+        [path] + ([a for a in args.split(' ') if a] if args else [])
+    )
+    runtime.context.open_file = (
+        lambda path: os.startfile(path)
+        if os.name == 'nt'
+        else subprocess.Popen(['xdg-open', path])
+    )
+    runtime.context.open_folder = (
+        lambda path: os.startfile(path)
+        if os.name == 'nt'
+        else subprocess.Popen(['xdg-open', path])
+    )
+
+    # URL：切回主线程
+    runtime.context.open_url = lambda url: ui_bridge.open_url_requested.emit(url)
+
+    # 天气 action hooks：切回主线程
+    runtime.context.show_weather_forecast = lambda: ui_bridge.weather_forecast_requested.emit()
+    runtime.context.show_weather_alerts = lambda: ui_bridge.weather_alerts_requested.emit()
+    runtime.context.show_weather_forecast_hourly = lambda: ui_bridge.weather_hourly_requested.emit()
+
+    # 当前时间
+    runtime.context.get_now = lambda: TimeManagerFactory.get_instance().get_current_time_without_ms()
+
+    # 当设置页“应用到运行时”后，自动重新同步托盘菜单
+    def _on_runtime_reloaded():
+        try:
+            logger.info('自动化运行时已重载，正在同步托盘菜单')
+            QTimer.singleShot(0, sync_automation_tray_menu)
+            QTimer.singleShot(300, sync_automation_tray_menu)
+        except Exception as e:
+            logger.debug(f'automation runtime reload 回调失败: {e}')
+
+    runtime.on_runtime_reloaded = _on_runtime_reloaded
+
+    return runtime
+
+
 
 def init() -> None:
     global theme, radius, mgr, screen_width, first_start, fw, was_floating_mode
@@ -4114,7 +4558,11 @@ def setup_signal_handlers_optimized() -> None:
 
     def signal_handler(signum, frame):
         logger.debug(f'收到信号 {signal.Signals(signum).name},退出...')
-        # utils.stop 处理退出
+        try:
+            if automation_runtime:
+                automation_runtime.lifecycle_bus.EmitStopping()
+        except Exception as e:
+            logger.debug(f'触发自动化 stopping 失败: {e}')
         utils.stop(0)
 
     signal.signal(signal.SIGTERM, signal_handler)  # taskkill
@@ -4131,6 +4579,17 @@ def get_part_index(part_id: Union[int, str]) -> int:
         return order.index(part_id)
     except ValueError:
         return -1
+def emit_automation_uri(path: str, revert: bool = False) -> None:
+    global automation_runtime
+    if automation_runtime is None:
+        return
+
+    suffix = path.strip('/')
+
+    if revert:
+        automation_runtime.uri_bus.EmitRevert(suffix)
+    else:
+        automation_runtime.uri_bus.EmitRun(suffix)
 
 def is_time_reached(now: dt.datetime, target: dt.datetime, tolerance_seconds: int = 1) -> bool:
     return 0 <= (now - target).total_seconds() < tolerance_seconds
@@ -4303,8 +4762,30 @@ if __name__ == '__main__':
     schedule_center.update_schedule()
 
     splash_window.update_status((91, QCoreApplication.translate('main', '加载窗口...')))
+    conf.ensure_default_automation_config()
 
+
+    automation_runtime = build_automation_runtime()
+
+    # 注册通知消费者
+    automation_notification_consumer = TipToastNotificationConsumer()
+    automation_runtime.notification_host.RegisterNotificationConsumer(
+        automation_notification_consumer, 0
+    )
+
+    # 加载当前自动化配置
+    automation_runtime.load_workflows(
+        conf.get_automation_config_path()
+    )
     init()
+    automation_runtime.start()
+
+    try:
+        sync_automation_tray_menu()
+    except Exception as e:
+        logger.debug(f'同步 automation 托盘菜单失败: {e}')
+
+    QTimer.singleShot(0, sync_automation_tray_menu)
 
     splash_window.update_status((95, QCoreApplication.translate('main', '加载课程...')))
 
@@ -4312,7 +4793,7 @@ if __name__ == '__main__':
     get_current_lessons()
     get_current_lesson_name()
     get_next_lessons()
-
+    automation_runtime.mark_running()
     splash_window.update_status((98, QCoreApplication.translate('main', '加载隐藏状态...')))
     '''
     hide_mode = config_center.read_conf('General', 'hide')

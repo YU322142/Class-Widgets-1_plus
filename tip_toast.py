@@ -181,7 +181,7 @@ class tip_toast(QWidget):
                 0, lambda: setThemeColor(f"#{config_center.read_conf('Color', 'prepare_class')}")
             )
         elif state == 4:
-            logger.info(self.tr('通知显示: {title}').format(title=title))
+            logger.info(f"通知显示：{title} | {content}")
             title_label.setText(title)
             subtitle_label.setText(subtitle)
             lesson.setText(content)

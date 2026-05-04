@@ -263,6 +263,305 @@ class WeatherDataCache:
 class WeatherManager:
     """天气管理"""
 
+    def show_weather_forecast_notification(self) -> None:
+        """
+        automation 兼容：显示三天天气预报（按当前 fetch_daily_forecast 返回结构定制）
+        """
+        try:
+            title = "天气预报"
+
+            def weather_text_from_code(code: object) -> str:
+                code_str = str(code)
+                try:
+                    if hasattr(self, "get_weather_by_code"):
+                        text = self.get_weather_by_code(code_str)
+                        if text:
+                            return str(text)
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, "get_weather_text_by_code"):
+                        text = self.get_weather_text_by_code(code_str)
+                        if text:
+                            return str(text)
+                except Exception:
+                    pass
+                try:
+                    if "weather_processor" in globals() and hasattr(weather_processor, "get_weather_by_code"):
+                        text = weather_processor.get_weather_by_code(code_str)
+                        if text:
+                            return str(text)
+                except Exception:
+                    pass
+                return f"天气{code_str}"
+
+            def normalize_temp_pair(v1, v2) -> tuple[str, str]:
+                try:
+                    a = float(v1)
+                    b = float(v2)
+                    lo = min(a, b)
+                    hi = max(a, b)
+                    lo_s = str(int(lo)) if lo.is_integer() else str(lo)
+                    hi_s = str(int(hi)) if hi.is_integer() else str(hi)
+                    return lo_s, hi_s
+                except Exception:
+                    return str(v1 or ""), str(v2 or "")
+
+            daily = []
+            try:
+                daily = self.fetch_daily_forecast(3)
+            except Exception as e:
+                logger.error(f"获取多天天气预报失败: {e}")
+                daily = []
+
+            logger.info(f"[AutomationWeatherForecast] fetched daily: {daily}")
+
+            if not daily:
+                content = "今明后三天天气预报"
+            else:
+                day_names = ["今天", "明天", "后天"]
+                parts = []
+
+                for i, item in enumerate(daily[:3]):
+                    if not isinstance(item, dict):
+                        continue
+
+                    day_name = day_names[i] if i < len(day_names) else f"第{i + 1}天"
+
+                    weather_day_text = weather_text_from_code(item.get("weather_day", ""))
+                    weather_night_text = weather_text_from_code(item.get("weather_night", ""))
+
+                    if weather_day_text and weather_night_text and weather_day_text != weather_night_text:
+                        weather_text = f"{weather_day_text}转{weather_night_text}"
+                    else:
+                        weather_text = weather_day_text or weather_night_text
+
+                    temp_low, temp_high = normalize_temp_pair(
+                        item.get("temp_high", ""),
+                        item.get("temp_low", ""),
+                    )
+
+                    temp_text = ""
+                    if temp_low and temp_high:
+                        temp_text = f"{temp_low}~{temp_high}℃"
+                    elif temp_high:
+                        temp_text = f"{temp_high}℃"
+                    elif temp_low:
+                        temp_text = f"{temp_low}℃"
+
+                    line = day_name
+                    if weather_text:
+                        line += f" {weather_text}"
+                    if temp_text:
+                        line += f" {temp_text}"
+
+                    parts.append(line.strip())
+
+                content = "；".join(parts) if parts else "今明后三天天气预报"
+
+            logger.info(f"[AutomationWeatherForecast] final content: {content}")
+
+            from tip_toast import push_notification
+            push_notification(
+                state=4,
+                title=title,
+                content=content,
+                duration=6000,
+            )
+        except Exception as e:
+            logger.error(f"显示天气预报通知失败: {e}")
+            try:
+                from tip_toast import push_notification
+                push_notification(
+                    state=4,
+                    title="天气预报",
+                    content="今明后三天天气预报",
+                    duration=5000,
+                )
+            except Exception:
+                pass
+
+    def show_alert_notification(self) -> None:
+        """
+        automation 兼容：显示天气预警（按当前数据结构定制）
+        """
+        try:
+            title = "天气预警"
+            content = "当前暂无天气预警"
+
+            alert_obj = None
+
+            if isinstance(getattr(self, "current_weather_data", None), dict):
+                alert_obj = self.current_weather_data.get("alert")
+
+            if not alert_obj:
+                alert_obj = getattr(self, "current_alert_data", None)
+
+            logger.info(f"[AutomationWeatherAlerts] alert_obj: {alert_obj}")
+
+            first = None
+
+            if isinstance(alert_obj, list) and alert_obj:
+                first = alert_obj[0]
+            elif isinstance(alert_obj, dict):
+                if any(k in alert_obj for k in ("title", "detail", "type", "level", "description", "desc")):
+                    first = alert_obj
+                elif "alerts" in alert_obj and isinstance(alert_obj["alerts"], list) and alert_obj["alerts"]:
+                    first = alert_obj["alerts"][0]
+                elif "warning" in alert_obj and isinstance(alert_obj["warning"], list) and alert_obj["warning"]:
+                    first = alert_obj["warning"][0]
+
+            if isinstance(first, dict):
+                alert_title = str(first.get("title", "") or "").strip()
+                alert_detail = str(
+                    first.get("detail", "")
+                    or first.get("description", "")
+                    or first.get("desc", "")
+                    or ""
+                ).strip()
+
+                if alert_title and alert_detail:
+                    content = f"{alert_title}：{alert_detail}"
+                elif alert_title:
+                    content = alert_title
+                elif alert_detail:
+                    content = alert_detail
+
+            logger.info(f"[AutomationWeatherAlerts] final content: {content}")
+
+            from tip_toast import push_notification
+            push_notification(
+                state=4,
+                title=title,
+                content=content,
+                duration=8000,
+            )
+        except Exception as e:
+            logger.error(f"显示天气预警通知失败: {e}")
+            try:
+                from tip_toast import push_notification
+                push_notification(
+                    state=4,
+                    title="天气预警",
+                    content="当前暂无天气预警",
+                    duration=6000,
+                )
+            except Exception:
+                pass
+
+    def show_weather_hourly_notification(self) -> None:
+        """
+        automation 兼容：显示逐小时天气预报（从当前小时开始取未来 6 小时）
+        """
+        try:
+            title = "逐小时天气"
+
+            def weather_text_from_code(code: object) -> str:
+                code_str = str(code)
+                try:
+                    if hasattr(self, "get_weather_by_code"):
+                        return str(self.get_weather_by_code(code_str))
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, "get_weather_text_by_code"):
+                        return str(self.get_weather_text_by_code(code_str))
+                except Exception:
+                    pass
+                try:
+                    if "weather_processor" in globals() and hasattr(weather_processor, "get_weather_by_code"):
+                        return str(weather_processor.get_weather_by_code(code_str))
+                except Exception:
+                    pass
+                return code_str
+
+            hourly = []
+            try:
+                hourly = self.fetch_hourly_forecast()
+            except Exception as e:
+                logger.error(f"获取逐小时天气预报失败: {e}")
+                hourly = []
+
+            logger.info(f"[AutomationWeatherHourly] fetched hourly: {hourly}")
+
+            if not hourly:
+                content = "接下来数小时天气趋势"
+            else:
+                # 只保留正常 hourly 项，跳过类似 {'precipitation_time': [23]} 这样的占位项
+                usable = []
+                for item in hourly:
+                    if not isinstance(item, dict):
+                        continue
+                    if "hour" not in item and "temperature" not in item and "weather_code" not in item:
+                        continue
+                    usable.append(item)
+
+                if not usable:
+                    content = "接下来数小时天气趋势"
+                else:
+                    current_hour = datetime.datetime.now().hour
+
+                    # 找到“当前小时及之后”的起点
+                    future_items = [x for x in usable if
+                                    isinstance(x.get("hour"), int) and x.get("hour") >= current_hour]
+
+                    # 如果当前小时后没有了，就从头补（跨天场景）
+                    if not future_items:
+                        future_items = usable
+
+                    selected = future_items[:6]
+
+                    parts = []
+                    for item in selected:
+                        hour_val = item.get("hour", None)
+                        if hour_val is None or hour_val == "":
+                            time_text = ""
+                        else:
+                            time_text = f"{hour_val}h"
+
+                        weather_code = item.get("weather_code")
+                        weather_text = (
+                            weather_text_from_code(weather_code)
+                            if weather_code not in (None, "")
+                            else ""
+                        )
+
+                        temp = item.get("temperature", "")
+                        temp_text = f"{temp}℃" if temp not in (None, "") else ""
+
+                        part = time_text
+                        if weather_text:
+                            part = f"{part} {weather_text}".strip()
+                        if temp_text:
+                            part = f"{part} {temp_text}".strip()
+
+                        if part:
+                            parts.append(part)
+
+                    content = "；".join(parts) if parts else "接下来数小时天气趋势"
+
+            logger.info(f"[AutomationWeatherHourly] final content: {content}")
+
+            from tip_toast import push_notification
+            push_notification(
+                state=4,
+                title=title,
+                content=content,
+                duration=7000,
+            )
+        except Exception as e:
+            logger.error(f"显示逐小时天气通知失败: {e}")
+            try:
+                from tip_toast import push_notification
+                push_notification(
+                    state=4,
+                    title="逐小时天气",
+                    content="接下来数小时天气趋势",
+                    duration=5000,
+                )
+            except Exception:
+                pass
+
     def __init__(self):
         self.api_config = self._load_api_config()
         self.cache = WeatherDataCache()

@@ -3,7 +3,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from dateutil import parser
 from loguru import logger
@@ -17,6 +17,8 @@ from utils import TimeManagerFactory
 
 conf = config.ConfigParser()
 name = 'Class Widgets'
+AUTOMATIONS_DIR = CONFIG_HOME / 'Automations'
+AUTOMATION_STATE_PATH = CONFIG_HOME / 'automation_state.json'
 
 # app 图标
 app_icon = (
@@ -229,6 +231,92 @@ def load_plugins() -> Dict[str, Dict[str, str]]:  # 加载插件配置文件
             plugin_dict[str(folder.name)]['settings'] = data['settings']  # 设置
             plugin_dict[str(folder.name)]['url'] = data.get('url', '')  # 插件URL
     return plugin_dict
+
+def ensure_automation_dirs() -> None:
+    AUTOMATIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_automation_state() -> Dict[str, Any]:
+    """
+    自动化运行状态配置，不等同于 workflow 文件本身。
+    用来保存：
+    - CurrentAutomationConfig
+    - IsAutomationEnabled
+    """
+    ensure_automation_dirs()
+    default = {
+        "CurrentAutomationConfig": "Default",
+        "IsAutomationEnabled": True,
+    }
+    try:
+        if AUTOMATION_STATE_PATH.exists():
+            with open(AUTOMATION_STATE_PATH, encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                default.update(data)
+        else:
+            with open(AUTOMATION_STATE_PATH, 'w', encoding='utf-8') as f:
+                json.dump(default, f, ensure_ascii=False, indent=4)
+        return default
+    except Exception as e:
+        logger.error(f"加载自动化状态失败: {e}")
+        return default
+
+
+def save_automation_state(data: Dict[str, Any]) -> bool:
+    ensure_automation_dirs()
+    current = load_automation_state()
+    current.update(data)
+    try:
+        with open(AUTOMATION_STATE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(current, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        logger.error(f"保存自动化状态失败: {e}")
+        return False
+
+
+def get_current_automation_config_name() -> str:
+    state = load_automation_state()
+    name = state.get("CurrentAutomationConfig", "Default")
+    return str(name or "Default")
+
+
+def set_current_automation_config_name(name: str) -> bool:
+    return save_automation_state({"CurrentAutomationConfig": name})
+
+
+def is_automation_enabled() -> bool:
+    state = load_automation_state()
+    return bool(state.get("IsAutomationEnabled", True))
+
+
+def set_automation_enabled(enabled: bool) -> bool:
+    return save_automation_state({"IsAutomationEnabled": bool(enabled)})
+
+
+def get_automation_config_path(name: Optional[str] = None) -> Path:
+    ensure_automation_dirs()
+    config_name = name or get_current_automation_config_name()
+    return AUTOMATIONS_DIR / f"{config_name}.json"
+
+
+def list_automation_configs() -> List[str]:
+    ensure_automation_dirs()
+    return sorted([p.stem for p in AUTOMATIONS_DIR.glob("*.json")])
+
+
+def ensure_default_automation_config() -> Path:
+    """
+    创建一个空的 ClassIsland 风格 workflow 数组文件。
+    """
+    ensure_automation_dirs()
+    path = get_automation_config_path("Default")
+    if not path.exists():
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
+    return path
+
 
 
 if __name__ == '__main__':
