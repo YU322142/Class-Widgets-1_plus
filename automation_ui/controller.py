@@ -111,6 +111,51 @@ class AutomationUiController:
     def ensure_default_config(self) -> Path:
         return self.conf.ensure_default_automation_config()
 
+    def create_config(self, name: str) -> str:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("配置文件名称不能为空。")
+
+        invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']
+        if any(ch in name for ch in invalid_chars):
+            raise ValueError("配置文件名称包含非法字符。")
+
+        path = self.conf.get_automation_config_path(name)
+        if path.exists():
+            raise FileExistsError(f"配置文件“{name}”已存在。")
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("[]", encoding="utf-8")
+
+        self.set_current_config_name(name)
+        self.load_current()
+        return name
+
+    def delete_config(self, name: str) -> str:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("未指定要删除的配置文件。")
+
+        configs = self.list_configs()
+        if name not in configs:
+            raise FileNotFoundError(f"配置文件“{name}”不存在。")
+
+        if len(configs) <= 1:
+            raise ValueError("至少需要保留一个自动化配置文件。")
+
+        path = self.conf.get_automation_config_path(name)
+        if path.exists():
+            path.unlink()
+
+        remain = [x for x in configs if x != name]
+        next_name = remain[0] if remain else "Default"
+
+        if self.get_current_config_name() == name:
+            self.set_current_config_name(next_name)
+            self.load_current()
+
+        return next_name
+
     def load_current(self) -> None:
         self.runtime.load_workflows(self.get_current_config_path())
 
@@ -278,7 +323,6 @@ class AutomationUiController:
                 info = get_trigger_info(trigger_id)
                 display_name = info.Name if info else default_name
 
-                # trayMenu 必须显示
                 if trigger_id in registered_ids or trigger_id == "classisland.trayMenu":
                     visible_items.append((trigger_id, display_name))
 
@@ -402,7 +446,12 @@ class AutomationUiController:
             return f"({kind_map.get(kind, kind)})"
 
         if action_id == "classisland.os.run":
-            return f"({getattr(s, 'Value', '')})"
+            run_type = getattr(s, "RunType", None)
+            run_type_name = getattr(run_type, "name", str(run_type)) if run_type is not None else ""
+            target = getattr(s, "Value", "")
+            if target:
+                return f"({run_type_name}: {target})"
+            return f"({run_type_name})"
 
         if action_id == "classisland.settings":
             return f"({getattr(s, 'Name', '')})"

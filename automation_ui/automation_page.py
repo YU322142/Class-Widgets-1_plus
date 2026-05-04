@@ -2,20 +2,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QListWidgetItem,
     QMessageBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    CheckBox,
     ComboBox,
     ListWidget,
     PrimaryPushButton,
@@ -27,6 +30,7 @@ from qfluentwidgets import (
 
 from .controller import AutomationUiController
 from .property_editor import AutomationPropertyEditor
+from .ruleset_editor import RulesetEditor
 
 
 TRIGGER_DESCRIPTIONS: dict[str, str] = {
@@ -34,8 +38,8 @@ TRIGGER_DESCRIPTIONS: dict[str, str] = {
     "classisland.lifetime.stopping": "在应用退出时触发。适合保存状态、发送退出通知。",
     "classisland.lessons.currentTimeStateChanged": "当当前时间状态发生变化时触发，如上课、课间、放学。",
     "classisland.lessons.onClass": "进入上课状态时触发。",
-    "classisland.lessons.onBreakingTime": "进入课间休息状态时触发。",
-    "classisland.lessons.onAfterSchool": "当天课程结束，进入放学状态时触发。",
+    "classisland.lessons.onBreakingTime": "进入课间休息时触发。",
+    "classisland.lessons.onAfterSchool": "当天课程结束时触发。",
     "classisland.lessons.preTimePoint": "在指定状态开始前若干秒触发，例如上课前 60 秒。",
     "classisland.cron": "按照 cron 表达式定时触发。适合周期性任务。",
     "classisland.signal": "收到应用内信号时触发。适合动作之间联动。",
@@ -56,6 +60,61 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
 }
 
 
+def _scroll_style() -> str:
+    return """
+    SmoothScrollArea, QAbstractScrollArea {
+        background: transparent;
+        border: none;
+    }
+    QWidget#AutomationLeftScrollContent,
+    QWidget#AutomationRightScrollContent {
+        background: transparent;
+    }
+
+    QScrollBar:vertical {
+        background: transparent;
+        width: 10px;
+        margin: 0px;
+    }
+    QScrollBar::handle:vertical {
+        background: rgba(0, 0, 0, 0.16);
+        min-height: 30px;
+        border-radius: 5px;
+    }
+    QScrollBar::add-line:vertical,
+    QScrollBar::sub-line:vertical {
+        height: 0px;
+        background: transparent;
+        border: none;
+    }
+    QScrollBar::add-page:vertical,
+    QScrollBar::sub-page:vertical {
+        background: transparent;
+    }
+
+    QScrollBar:horizontal {
+        background: transparent;
+        height: 10px;
+        margin: 0px;
+    }
+    QScrollBar::handle:horizontal {
+        background: rgba(0, 0, 0, 0.16);
+        min-width: 30px;
+        border-radius: 5px;
+    }
+    QScrollBar::add-line:horizontal,
+    QScrollBar::sub-line:horizontal {
+        width: 0px;
+        background: transparent;
+        border: none;
+    }
+    QScrollBar::add-page:horizontal,
+    QScrollBar::sub-page:horizontal {
+        background: transparent;
+    }
+    """
+
+
 class CardFrame(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -63,12 +122,13 @@ class CardFrame(QFrame):
         self.setStyleSheet(
             """
             QFrame#AutomationCardFrame {
-                background: rgba(255, 255, 255, 0.72);
+                background: rgba(255, 255, 255, 0.82);
                 border: 1px solid rgba(0, 0, 0, 0.035);
                 border-radius: 12px;
             }
             """
         )
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
 
 class SectionHeader(QWidget):
@@ -79,6 +139,7 @@ class SectionHeader(QWidget):
         layout.setSpacing(2)
 
         self.title_label = StrongBodyLabel(title)
+        self.title_label.setWordWrap(True)
         layout.addWidget(self.title_label)
 
         self.desc_label = CaptionLabel(desc)
@@ -89,13 +150,6 @@ class SectionHeader(QWidget):
 
 
 class GroupedPickerDialog(QDialog):
-    """
-    更适合初学者的分组选择弹窗：
-    - 左侧分组
-    - 中间条目
-    - 下方说明
-    """
-
     def __init__(
         self,
         title: str,
@@ -105,11 +159,12 @@ class GroupedPickerDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(780, 500)
-
+        self.resize(760, 500)
+        self.selected_id: str | None = None
         self._groups = groups
         self._descriptions = item_descriptions or {}
-        self.selected_id: str | None = None
+
+        self.setStyleSheet("QDialog { background: white; }")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 20, 20, 20)
@@ -118,19 +173,22 @@ class GroupedPickerDialog(QDialog):
         title_label = TitleLabel(title)
         root.addWidget(title_label)
 
-        desc = BodyLabel("先选择左侧分组，再选择具体条目。")
+        desc = BodyLabel("请先选择左侧分组，再选择右侧条目。")
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #666;")
         root.addWidget(desc)
 
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(8)
+        splitter.setStyleSheet("QSplitter::handle { background: transparent; }")
         root.addWidget(splitter, 1)
 
         left_card = CardFrame()
         left_layout = QVBoxLayout(left_card)
         left_layout.setContentsMargins(10, 10, 10, 10)
         left_layout.setSpacing(8)
-        left_layout.addWidget(SectionHeader("分组", "按概念分类，方便快速定位。"))
+        left_layout.addWidget(SectionHeader("分组", "按功能分类。"))
         self.group_list = ListWidget()
         self.group_list.setAlternatingRowColors(True)
         left_layout.addWidget(self.group_list, 1)
@@ -139,7 +197,7 @@ class GroupedPickerDialog(QDialog):
         right_layout = QVBoxLayout(right_card)
         right_layout.setContentsMargins(10, 10, 10, 10)
         right_layout.setSpacing(8)
-        right_layout.addWidget(SectionHeader("条目", "请选择你要添加的触发器或动作。"))
+        right_layout.addWidget(SectionHeader("条目", "请选择要添加的条目。"))
         self.item_list = ListWidget()
         self.item_list.setAlternatingRowColors(True)
         right_layout.addWidget(self.item_list, 1)
@@ -147,7 +205,7 @@ class GroupedPickerDialog(QDialog):
         splitter.addWidget(left_card)
         splitter.addWidget(right_card)
         splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 4)
+        splitter.setStretchFactor(1, 5)
 
         self.desc_card = CardFrame()
         desc_layout = QVBoxLayout(self.desc_card)
@@ -162,7 +220,6 @@ class GroupedPickerDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
-
         self.ok_btn = PrimaryPushButton("确定")
         self.cancel_btn = PushButton("取消")
         btn_row.addWidget(self.ok_btn)
@@ -222,12 +279,10 @@ class GroupedPickerDialog(QDialog):
 
 class AutomationSettingsPage(QWidget):
     """
-    自动化设置页（第二步 UI 优化版）
-
-    目标：
-    - 更贴近 ClassWidgets 现有设置页风格
-    - 更适合初学者
-    - 不改变你当前已经稳定的运行逻辑
+    左右响应式：
+    - 左：启用自动化 / 配置文件 / 当前状态 / 参数设置
+    - 右：工作流 / 触发器 / 条件 / 动作
+    - 只做左右响应式，右侧内部保持自然纵向布局
     """
 
     def __init__(self, runtime: Any, conf_module: Any, parent=None) -> None:
@@ -246,9 +301,7 @@ class AutomationSettingsPage(QWidget):
         self._reload_all()
         self._set_status_info(self._build_idle_status_text())
 
-    # =========================================================
-    # UI
-    # =========================================================
+        QTimer.singleShot(0, self._apply_initial_sizes)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -258,150 +311,201 @@ class AutomationSettingsPage(QWidget):
         self.title_label = TitleLabel("自动化")
         root.addWidget(self.title_label)
 
-        self.subtitle_label = BodyLabel(
-            "通过“触发器 + 条件 + 动作”的方式，配置应用在不同场景下自动执行任务。"
-        )
+        self.subtitle_label = BodyLabel("通过“触发器 + 条件 + 动作”的方式，让应用在不同场景下自动执行任务。")
         self.subtitle_label.setWordWrap(True)
         self.subtitle_label.setStyleSheet("color: #666;")
         root.addWidget(self.subtitle_label)
 
-        self.scroll = SmoothScrollArea()
-        self.scroll.setStyleSheet("background: transparent; border: none")
-        self.scroll.setWidgetResizable(True)
-        root.addWidget(self.scroll, 1)
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setHandleWidth(8)
+        self.main_splitter.setStyleSheet("QSplitter::handle { background: transparent; }")
+        self.main_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        root.addWidget(self.main_splitter, 1)
 
-        self.scroll_content = QWidget()
-        self.scroll.setWidget(self.scroll_content)
+        # =========================
+        # 左栏
+        # =========================
+        self.left_scroll = SmoothScrollArea()
+        self.left_scroll.setStyleSheet(_scroll_style())
+        self.left_scroll.setWidgetResizable(True)
+        self.main_splitter.addWidget(self.left_scroll)
 
-        content_layout = QVBoxLayout(self.scroll_content)
-        content_layout.setContentsMargins(0, 0, 0, 24)
-        content_layout.setSpacing(18)
+        self.left_content = QWidget()
+        self.left_content.setObjectName("AutomationLeftScrollContent")
+        self.left_scroll.setWidget(self.left_content)
 
-        # 快速开始卡
-        self.quick_start_card = CardFrame()
-        quick_layout = QVBoxLayout(self.quick_start_card)
-        quick_layout.setContentsMargins(16, 16, 16, 16)
-        quick_layout.setSpacing(8)
-        quick_layout.addWidget(SectionHeader("快速开始", "如果你是第一次使用，建议按这个顺序操作："))
+        left_layout = QVBoxLayout(self.left_content)
+        left_layout.setContentsMargins(0, 0, 0, 24)
+        left_layout.setSpacing(12)
 
-        self.quick_start_label = BodyLabel(
-            "1. 选择一个配置文件\n"
-            "2. 新建一个工作流\n"
-            "3. 给工作流添加触发器（决定什么时候触发）\n"
-            "4. 给工作流添加动作（决定触发后做什么）\n"
-            "5. 点击“保存”写入文件；如果希望当前会话立即生效，再点击“应用到运行时”"
+        self.enable_card = CardFrame()
+        enable_layout = QVBoxLayout(self.enable_card)
+        enable_layout.setContentsMargins(16, 16, 16, 16)
+        enable_layout.setSpacing(10)
+        enable_layout.addWidget(
+            SectionHeader("启用自动化", "关闭后，当前配置仍会保留，但自动化不会执行。")
         )
-        self.quick_start_label.setWordWrap(True)
-        self.quick_start_label.setStyleSheet("color: #444;")
-        quick_layout.addWidget(self.quick_start_label)
-        content_layout.addWidget(self.quick_start_card)
 
-        # 顶部配置卡
+        enable_row = QHBoxLayout()
+        self.enable_box = CheckBox("启用自动化")
+        enable_row.addWidget(self.enable_box)
+        enable_row.addStretch(1)
+        enable_layout.addLayout(enable_row)
+
+        self.enable_hint = CaptionLabel("建议只在你已经配置好至少一个工作流后再开启。")
+        self.enable_hint.setWordWrap(True)
+        self.enable_hint.setStyleSheet("color: #666;")
+        enable_layout.addWidget(self.enable_hint)
+        left_layout.addWidget(self.enable_card)
+
         self.config_card = CardFrame()
         config_layout = QVBoxLayout(self.config_card)
         config_layout.setContentsMargins(16, 16, 16, 16)
         config_layout.setSpacing(10)
-
         config_layout.addWidget(
-            SectionHeader(
-                "配置文件",
-                "自动化数据保存在 Automations/*.json 中。应用到运行时后，当前会话会按当前配置文件整体重载，不会和旧工作流合并。",
-            )
+            SectionHeader("配置文件", "不同配置文件可以存放不同的一组自动化方案。")
         )
 
         row1 = QHBoxLayout()
+        row1.setSpacing(10)
         self.config_combo = ComboBox()
+        self.config_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         row1.addWidget(self.config_combo, 1)
+        self.new_config_btn = PushButton("新建配置")
+        self.delete_config_btn = PushButton("删除配置")
+        row1.addWidget(self.new_config_btn)
+        row1.addWidget(self.delete_config_btn)
+        config_layout.addLayout(row1)
 
+        row2 = QHBoxLayout()
+        row2.setSpacing(10)
         self.reload_btn = PushButton("重载")
         self.save_btn = PushButton("保存到文件")
         self.apply_btn = PrimaryPushButton("应用到运行时")
-        self.new_workflow_btn = PushButton("新建工作流")
-        self.delete_workflow_btn = PushButton("删除工作流")
+        row2.addWidget(self.reload_btn)
+        row2.addWidget(self.save_btn)
+        row2.addWidget(self.apply_btn)
+        config_layout.addLayout(row2)
 
-        row1.addWidget(self.reload_btn)
-        row1.addWidget(self.save_btn)
-        row1.addWidget(self.apply_btn)
-        row1.addWidget(self.new_workflow_btn)
-        row1.addWidget(self.delete_workflow_btn)
-        config_layout.addLayout(row1)
+        self._set_responsive_button_widths(
+            [
+                self.new_config_btn,
+                self.delete_config_btn,
+                self.reload_btn,
+                self.save_btn,
+                self.apply_btn,
+            ],
+            108,
+        )
 
         self.config_info_label = BodyLabel("")
         self.config_info_label.setWordWrap(True)
         self.config_info_label.setStyleSheet("color: #444;")
         config_layout.addWidget(self.config_info_label)
-        content_layout.addWidget(self.config_card)
 
-        # 状态卡
+        left_layout.addWidget(self.config_card)
+
         self.status_card = CardFrame()
         status_layout = QVBoxLayout(self.status_card)
         status_layout.setContentsMargins(16, 12, 16, 12)
         status_layout.setSpacing(4)
-
         status_layout.addWidget(SectionHeader("当前状态"))
         self.status_label = BodyLabel("")
         self.status_label.setWordWrap(True)
         self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         status_layout.addWidget(self.status_label)
+        left_layout.addWidget(self.status_card)
 
-        content_layout.addWidget(self.status_card)
+        self.property_card = CardFrame()
+        property_layout = QVBoxLayout(self.property_card)
+        property_layout.setContentsMargins(16, 16, 16, 16)
+        property_layout.setSpacing(10)
+        property_layout.addWidget(
+            SectionHeader("参数设置", "点击右侧的工作流、触发器、动作后，这里会显示对应的详细参数。")
+        )
+        self.property_editor = AutomationPropertyEditor()
+        property_layout.addWidget(self.property_editor)
+        left_layout.addWidget(self.property_card)
 
-        # 主编辑区
-        self.main_splitter = QSplitter(Qt.Horizontal)
-        content_layout.addWidget(self.main_splitter, 1)
+        left_layout.addStretch(1)
 
-        # 左：工作流
+        # =========================
+        # 右栏
+        # =========================
+        self.right_scroll = SmoothScrollArea()
+        self.right_scroll.setStyleSheet(_scroll_style())
+        self.right_scroll.setWidgetResizable(True)
+        self.main_splitter.addWidget(self.right_scroll)
+
+        self.right_content = QWidget()
+        self.right_content.setObjectName("AutomationRightScrollContent")
+        self.right_scroll.setWidget(self.right_content)
+
+        right_layout = QVBoxLayout(self.right_content)
+        right_layout.setContentsMargins(0, 0, 0, 24)
+        right_layout.setSpacing(12)
+
         self.workflow_card = CardFrame()
         workflow_layout = QVBoxLayout(self.workflow_card)
-        workflow_layout.setContentsMargins(12, 12, 12, 12)
+        workflow_layout.setContentsMargins(16, 16, 16, 16)
         workflow_layout.setSpacing(10)
 
         workflow_layout.addWidget(
-            SectionHeader("工作流", "工作流是自动化的基本单位。一个工作流通常包含：触发器、可选条件、动作。")
+            SectionHeader("工作流", "每个工作流都包含：触发器、可选条件、动作。")
+        )
+
+        top_btns = QHBoxLayout()
+        top_btns.setSpacing(10)
+        self.new_workflow_btn = PrimaryPushButton("新建工作流")
+        self.delete_workflow_btn = PushButton("删除工作流")
+        self.workflow_up_btn = PushButton("上移")
+        self.workflow_down_btn = PushButton("下移")
+        top_btns.addWidget(self.new_workflow_btn)
+        top_btns.addWidget(self.delete_workflow_btn)
+        top_btns.addWidget(self.workflow_up_btn)
+        top_btns.addWidget(self.workflow_down_btn)
+        workflow_layout.addLayout(top_btns)
+
+        self._set_responsive_button_widths(
+            [
+                self.new_workflow_btn,
+                self.delete_workflow_btn,
+                self.workflow_up_btn,
+                self.workflow_down_btn,
+            ],
+            102,
         )
 
         self.workflow_list = ListWidget()
         self.workflow_list.setAlternatingRowColors(True)
-        workflow_layout.addWidget(self.workflow_list, 1)
+        self.workflow_list.setMinimumHeight(180)
+        workflow_layout.addWidget(self.workflow_list)
 
-        self.workflow_tip = CaptionLabel("选中左侧工作流后，可在中间查看触发器和动作，在右侧编辑属性。")
+        self.workflow_tip = CaptionLabel("先选中工作流，再在下面继续配置它的触发器、条件和动作。")
         self.workflow_tip.setWordWrap(True)
         self.workflow_tip.setStyleSheet("color: #666;")
         workflow_layout.addWidget(self.workflow_tip)
-
-        workflow_btns = QHBoxLayout()
-        self.workflow_up_btn = PushButton("上移")
-        self.workflow_down_btn = PushButton("下移")
-        workflow_btns.addWidget(self.workflow_up_btn)
-        workflow_btns.addWidget(self.workflow_down_btn)
-        workflow_layout.addLayout(workflow_btns)
-
-        self.main_splitter.addWidget(self.workflow_card)
-
-        # 中：触发器 / 条件 / 动作
-        self.middle_container = QWidget()
-        middle_layout = QVBoxLayout(self.middle_container)
-        middle_layout.setContentsMargins(0, 0, 0, 0)
-        middle_layout.setSpacing(12)
+        right_layout.addWidget(self.workflow_card)
 
         self.trigger_card = CardFrame()
         trigger_layout = QVBoxLayout(self.trigger_card)
-        trigger_layout.setContentsMargins(12, 12, 12, 12)
+        trigger_layout.setContentsMargins(16, 16, 16, 16)
         trigger_layout.setSpacing(10)
-        trigger_layout.addWidget(
-            SectionHeader("触发器", "触发器决定工作流在什么时候开始执行。")
-        )
+        trigger_layout.addWidget(SectionHeader("触发器", "决定工作流在什么时候开始执行。"))
 
         self.trigger_list = ListWidget()
         self.trigger_list.setAlternatingRowColors(True)
+        self.trigger_list.setMinimumHeight(120)
         trigger_layout.addWidget(self.trigger_list)
 
-        self.trigger_tip = CaptionLabel("常见示例：应用启动时、托盘菜单点击时、收到信号时、到达指定时间时。")
+        self.trigger_tip = CaptionLabel("常见示例：应用启动时、托盘菜单点击时、收到信号时。")
         self.trigger_tip.setWordWrap(True)
         self.trigger_tip.setStyleSheet("color: #666;")
         trigger_layout.addWidget(self.trigger_tip)
 
         trigger_btns = QHBoxLayout()
+        trigger_btns.setSpacing(10)
         self.add_trigger_btn = PushButton("添加触发器")
         self.del_trigger_btn = PushButton("删除触发器")
         self.trigger_up_btn = PushButton("上移")
@@ -412,39 +516,47 @@ class AutomationSettingsPage(QWidget):
         trigger_btns.addWidget(self.trigger_down_btn)
         trigger_layout.addLayout(trigger_btns)
 
-        middle_layout.addWidget(self.trigger_card)
+        self._set_responsive_button_widths(
+            [
+                self.add_trigger_btn,
+                self.del_trigger_btn,
+                self.trigger_up_btn,
+                self.trigger_down_btn,
+            ],
+            102,
+        )
+
+        right_layout.addWidget(self.trigger_card)
 
         self.rules_card = CardFrame()
         rules_layout = QVBoxLayout(self.rules_card)
-        rules_layout.setContentsMargins(12, 12, 12, 12)
+        rules_layout.setContentsMargins(16, 16, 16, 16)
         rules_layout.setSpacing(10)
         rules_layout.addWidget(
-            SectionHeader("条件 / 规则集", "条件用于进一步限制工作流是否执行。")
+            SectionHeader("条件 / 规则集", "用于进一步限制工作流是否执行；初学者可以先不启用。")
         )
-        self.rules_hint_label = BodyLabel("当前版本暂未提供完整规则集编辑器。下一阶段将补充规则组 / 规则条目可视化编辑。")
-        self.rules_hint_label.setWordWrap(True)
-        self.rules_hint_label.setStyleSheet("color: #666;")
-        rules_layout.addWidget(self.rules_hint_label)
-        middle_layout.addWidget(self.rules_card)
+        self.rules_editor = RulesetEditor()
+        rules_layout.addWidget(self.rules_editor)
+        right_layout.addWidget(self.rules_card)
 
         self.action_card = CardFrame()
         action_layout = QVBoxLayout(self.action_card)
-        action_layout.setContentsMargins(12, 12, 12, 12)
+        action_layout.setContentsMargins(16, 16, 16, 16)
         action_layout.setSpacing(10)
-        action_layout.addWidget(
-            SectionHeader("动作", "动作会在触发器满足后按顺序串行执行。")
-        )
+        action_layout.addWidget(SectionHeader("动作", "触发器满足后，会按顺序执行这些动作。"))
 
         self.action_list = ListWidget()
         self.action_list.setAlternatingRowColors(True)
-        action_layout.addWidget(self.action_list, 1)
+        self.action_list.setMinimumHeight(120)
+        action_layout.addWidget(self.action_list)
 
-        self.action_tip = CaptionLabel("常见示例：显示提醒、运行程序、等待时长、修改设置、广播信号。")
+        self.action_tip = CaptionLabel("常见示例：显示提醒、运行程序、等待时长、广播信号。")
         self.action_tip.setWordWrap(True)
         self.action_tip.setStyleSheet("color: #666;")
         action_layout.addWidget(self.action_tip)
 
         action_btns = QHBoxLayout()
+        action_btns.setSpacing(10)
         self.add_action_btn = PushButton("添加动作")
         self.del_action_btn = PushButton("删除动作")
         self.action_up_btn = PushButton("上移")
@@ -455,27 +567,34 @@ class AutomationSettingsPage(QWidget):
         action_btns.addWidget(self.action_down_btn)
         action_layout.addLayout(action_btns)
 
-        middle_layout.addWidget(self.action_card, 1)
-
-        self.main_splitter.addWidget(self.middle_container)
-
-        # 右：属性
-        self.property_card = CardFrame()
-        property_layout = QVBoxLayout(self.property_card)
-        property_layout.setContentsMargins(12, 12, 12, 12)
-        property_layout.setSpacing(10)
-        property_layout.addWidget(
-            SectionHeader("属性", "这里显示当前选中对象的详细配置。")
+        self._set_responsive_button_widths(
+            [
+                self.add_action_btn,
+                self.del_action_btn,
+                self.action_up_btn,
+                self.action_down_btn,
+            ],
+            102,
         )
 
-        self.property_editor = AutomationPropertyEditor()
-        property_layout.addWidget(self.property_editor, 1)
+        right_layout.addWidget(self.action_card)
+        right_layout.addStretch(1)
 
-        self.main_splitter.addWidget(self.property_card)
+    def _set_responsive_button_widths(self, buttons: list[QWidget], min_width: int) -> None:
+        for btn in buttons:
+            try:
+                btn.setMinimumWidth(min_width)
+                btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            except Exception:
+                pass
 
-        self.main_splitter.setStretchFactor(0, 2)
-        self.main_splitter.setStretchFactor(1, 3)
-        self.main_splitter.setStretchFactor(2, 3)
+    def _apply_initial_sizes(self) -> None:
+        total = max(self.width(), 1280)
+        # 用比例而不是死值，改善高 DPI / 大缩放屏幕下两边显示不全
+        left = int(total * 0.40)
+        left = max(380, min(left, 560))
+        right = max(520, total - left - 24)
+        self.main_splitter.setSizes([left, right])
 
     # =========================================================
     # Status helpers
@@ -536,7 +655,9 @@ class AutomationSettingsPage(QWidget):
         name = self.controller.get_current_config_name()
         wf_count = len(self.controller.workflows)
         runtime_text = "已连接当前运行时" if self.controller.has_live_runtime() else "仅文件模式"
-        self.config_info_label.setText(f"当前配置：{name}    ·    工作流数量：{wf_count}    ·    {runtime_text}")
+        self.config_info_label.setText(
+            f"当前配置：{name}    ·    工作流数量：{wf_count}    ·    {runtime_text}"
+        )
 
     # =========================================================
     # Signals
@@ -546,6 +667,10 @@ class AutomationSettingsPage(QWidget):
         self.reload_btn.clicked.connect(self._on_reload)
         self.save_btn.clicked.connect(self._on_save)
         self.apply_btn.clicked.connect(self._on_apply)
+        self.new_config_btn.clicked.connect(self._on_new_config)
+        self.delete_config_btn.clicked.connect(self._on_delete_config)
+
+        self.enable_box.toggled.connect(self._on_global_enabled_changed)
 
         self.new_workflow_btn.clicked.connect(self._on_new_workflow)
         self.delete_workflow_btn.clicked.connect(self._on_delete_workflow)
@@ -567,6 +692,7 @@ class AutomationSettingsPage(QWidget):
         self.action_list.currentRowChanged.connect(self._on_action_selected)
 
         self.property_editor.changed.connect(self._on_property_changed)
+        self.rules_editor.changed.connect(self._on_ruleset_changed)
         self.config_combo.currentIndexChanged.connect(self._on_config_changed)
 
     # =========================================================
@@ -576,7 +702,15 @@ class AutomationSettingsPage(QWidget):
     def _reload_all(self) -> None:
         self._reload_configs()
         self._reload_workflows()
+        self._reload_global_state()
         self._update_config_info()
+
+    def _reload_global_state(self) -> None:
+        settings = self.controller.runtime.context.settings
+        enabled = bool(getattr(settings, "IsAutomationEnabled", True))
+        self.enable_box.blockSignals(True)
+        self.enable_box.setChecked(enabled)
+        self.enable_box.blockSignals(False)
 
     def _reload_configs(self) -> None:
         self.config_combo.blockSignals(True)
@@ -600,9 +734,7 @@ class AutomationSettingsPage(QWidget):
         self.workflow_list.clear()
 
         for workflow in self.controller.workflows:
-            self.workflow_list.addItem(
-                QListWidgetItem(self.controller.workflow_display_text(workflow))
-            )
+            self.workflow_list.addItem(QListWidgetItem(self.controller.workflow_display_text(workflow)))
 
         if self.controller.workflows:
             if self._current_workflow_index < 0:
@@ -614,6 +746,7 @@ class AutomationSettingsPage(QWidget):
             self.trigger_list.clear()
             self.action_list.clear()
             self.property_editor.set_target(None, None)
+            self.rules_editor.set_workflow(None)
 
     def _reload_middle(self) -> None:
         self.trigger_list.clear()
@@ -622,20 +755,26 @@ class AutomationSettingsPage(QWidget):
         workflow = self._get_current_workflow()
         if workflow is None:
             self.property_editor.set_target(None, None)
+            self.rules_editor.set_workflow(None)
             self._update_config_info()
             return
 
         for trigger in workflow.Triggers:
-            self.trigger_list.addItem(
-                QListWidgetItem(self.controller.trigger_display_text(trigger))
-            )
+            self.trigger_list.addItem(QListWidgetItem(self.controller.trigger_display_text(trigger)))
 
         for action in workflow.ActionSet.Actions:
-            self.action_list.addItem(
-                QListWidgetItem(self.controller.action_display_text(action))
-            )
+            self.action_list.addItem(QListWidgetItem(self.controller.action_display_text(action)))
 
-        self.property_editor.set_target("workflow", workflow)
+        if self._current_trigger_index >= 0:
+            trigger = self._get_current_trigger()
+            self.property_editor.set_target("trigger", trigger)
+        elif self._current_action_index >= 0:
+            action = self._get_current_action()
+            self.property_editor.set_target("action", action)
+        else:
+            self.property_editor.set_target("workflow", workflow)
+
+        self.rules_editor.set_workflow(workflow)
         self._update_config_info()
 
     def _refresh_summary_texts_only(self) -> None:
@@ -705,12 +844,73 @@ class AutomationSettingsPage(QWidget):
         return None
 
     # =========================================================
-    # Top bar
+    # Config actions
     # =========================================================
+
+    def _on_new_config(self) -> None:
+        try:
+            name, ok = QInputDialog.getText(self, "新建配置", "请输入新配置名称：")
+            if not ok:
+                return
+            name = (name or "").strip()
+            if not name:
+                return
+
+            created = self.controller.create_config(name)
+            self._reload_all()
+            idx = self.config_combo.findText(created)
+            if idx >= 0:
+                self.config_combo.setCurrentIndex(idx)
+
+            self._set_status_saved(f"已新建配置：{created}。当前正在编辑新配置文件。")
+        except Exception as e:
+            self._set_status_error(f"新建配置失败：{e}")
+            QMessageBox.critical(self, "自动化", f"新建配置失败：\n{e}")
+
+    def _on_delete_config(self) -> None:
+        try:
+            current = self.controller.get_current_config_name()
+            ret = QMessageBox.question(
+                self,
+                "删除配置",
+                f"确定要删除配置文件“{current}”吗？\n\n删除后无法恢复。",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if ret != QMessageBox.Yes:
+                return
+
+            next_name = self.controller.delete_config(current)
+            self._reload_all()
+            idx = self.config_combo.findText(next_name)
+            if idx >= 0:
+                self.config_combo.setCurrentIndex(idx)
+
+            self._set_status_saved(f"已删除配置：{current}。当前切换到：{next_name}。")
+        except Exception as e:
+            self._set_status_error(f"删除配置失败：{e}")
+            QMessageBox.critical(self, "自动化", f"删除配置失败：\n{e}")
+
+    # =========================================================
+    # Global / top bar
+    # =========================================================
+
+    def _on_global_enabled_changed(self, state: bool) -> None:
+        try:
+            settings = self.controller.runtime.context.settings
+            if hasattr(settings, "IsAutomationEnabled"):
+                settings.IsAutomationEnabled = bool(state)
+            self.controller.save_current()
+            self._set_status_saved("已修改“启用自动化”状态，并保存到文件。若要影响当前会话，请点击“应用到运行时”。")
+        except Exception as e:
+            self._set_status_error(f"修改启用状态失败：{e}")
+            QMessageBox.critical(self, "自动化", f"修改启用状态失败：\n{e}")
 
     def _on_reload(self) -> None:
         try:
             self.controller.load_current()
+            self._current_trigger_index = -1
+            self._current_action_index = -1
             self._reload_all()
             self._set_status_info(
                 f"已从文件重载配置：{self.controller.get_current_config_name()}。"
@@ -780,6 +980,7 @@ class AutomationSettingsPage(QWidget):
             self._current_trigger_index = -1
             self._current_action_index = -1
             self._reload_workflows()
+            self._reload_global_state()
             self._update_config_info()
 
             self._set_status_saved(
@@ -798,8 +999,9 @@ class AutomationSettingsPage(QWidget):
         try:
             self.controller.create_workflow()
             self._current_workflow_index = len(self.controller.workflows) - 1
+            self._current_trigger_index = -1
+            self._current_action_index = -1
             self._reload_workflows()
-            self._update_config_info()
             self._set_status_saved("已新建工作流，并保存到文件。若要当前会话生效，请点击“应用到运行时”。")
         except Exception as e:
             self._set_status_error(f"新建工作流失败：{e}")
@@ -810,9 +1012,10 @@ class AutomationSettingsPage(QWidget):
             if self._current_workflow_index < 0:
                 return
             self.controller.delete_workflow(self._current_workflow_index)
+            self._current_trigger_index = -1
+            self._current_action_index = -1
             self._current_workflow_index = min(self._current_workflow_index, len(self.controller.workflows) - 1)
             self._reload_workflows()
-            self._update_config_info()
             self._set_status_saved("已删除工作流，并保存到文件。若要当前会话生效，请点击“应用到运行时”。")
         except Exception as e:
             self._set_status_error(f"删除工作流失败：{e}")
@@ -822,7 +1025,6 @@ class AutomationSettingsPage(QWidget):
         try:
             self._current_workflow_index = self.controller.move_workflow_up(self._current_workflow_index)
             self._reload_workflows()
-            self._update_config_info()
             self._set_status_saved("已调整工作流顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"上移工作流失败：{e}")
@@ -832,7 +1034,6 @@ class AutomationSettingsPage(QWidget):
         try:
             self._current_workflow_index = self.controller.move_workflow_down(self._current_workflow_index)
             self._reload_workflows()
-            self._update_config_info()
             self._set_status_saved("已调整工作流顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"下移工作流失败：{e}")
@@ -854,7 +1055,6 @@ class AutomationSettingsPage(QWidget):
 
             self.controller.add_trigger(workflow, trigger_id)
             self._reload_middle()
-            self._update_config_info()
             self._set_status_saved("已添加触发器，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"添加触发器失败：{e}")
@@ -868,7 +1068,6 @@ class AutomationSettingsPage(QWidget):
             self.controller.delete_trigger(workflow, self._current_trigger_index)
             self._current_trigger_index = -1
             self._reload_middle()
-            self._update_config_info()
             self._set_status_saved("已删除触发器，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"删除触发器失败：{e}")
@@ -883,7 +1082,6 @@ class AutomationSettingsPage(QWidget):
             self._reload_middle()
             if self._current_trigger_index >= 0:
                 self.trigger_list.setCurrentRow(self._current_trigger_index)
-            self._update_config_info()
             self._set_status_saved("已调整触发器顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"上移触发器失败：{e}")
@@ -898,7 +1096,6 @@ class AutomationSettingsPage(QWidget):
             self._reload_middle()
             if self._current_trigger_index >= 0:
                 self.trigger_list.setCurrentRow(self._current_trigger_index)
-            self._update_config_info()
             self._set_status_saved("已调整触发器顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"下移触发器失败：{e}")
@@ -920,7 +1117,6 @@ class AutomationSettingsPage(QWidget):
 
             self.controller.add_action(workflow, action_id)
             self._reload_middle()
-            self._update_config_info()
             self._set_status_saved("已添加动作，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"添加动作失败：{e}")
@@ -934,7 +1130,6 @@ class AutomationSettingsPage(QWidget):
             self.controller.delete_action(workflow, self._current_action_index)
             self._current_action_index = -1
             self._reload_middle()
-            self._update_config_info()
             self._set_status_saved("已删除动作，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"删除动作失败：{e}")
@@ -949,7 +1144,6 @@ class AutomationSettingsPage(QWidget):
             self._reload_middle()
             if self._current_action_index >= 0:
                 self.action_list.setCurrentRow(self._current_action_index)
-            self._update_config_info()
             self._set_status_saved("已调整动作顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"上移动作失败：{e}")
@@ -964,7 +1158,6 @@ class AutomationSettingsPage(QWidget):
             self._reload_middle()
             if self._current_action_index >= 0:
                 self.action_list.setCurrentRow(self._current_action_index)
-            self._update_config_info()
             self._set_status_saved("已调整动作顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"下移动作失败：{e}")
@@ -1018,3 +1211,12 @@ class AutomationSettingsPage(QWidget):
         except Exception as e:
             self._set_status_error(f"保存属性失败：{e}")
             QMessageBox.critical(self, "自动化", f"保存属性失败：\n{e}")
+
+    def _on_ruleset_changed(self) -> None:
+        try:
+            self.controller.save_current()
+            self._refresh_summary_texts_only()
+            self._set_status_saved("已修改规则集，并保存到文件。若要影响当前会话，请点击“应用到运行时”。")
+        except Exception as e:
+            self._set_status_error(f"保存规则集失败：{e}")
+            QMessageBox.critical(self, "自动化", f"保存规则集失败：\n{e}")
