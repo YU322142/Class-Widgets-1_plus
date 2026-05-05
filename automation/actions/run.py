@@ -154,8 +154,7 @@ class RunAction(ActionBaseT[RunActionSettings]):
             )
 
         try:
-            communicate_task = asyncio.create_task(self._running_process.communicate())
-            stdout, stderr = await self.WaitAsync(communicate_task)
+            stdout, stderr = await self.WaitAsync(self._running_process.communicate())
         except ActionInterruptedError:
             raise
         finally:

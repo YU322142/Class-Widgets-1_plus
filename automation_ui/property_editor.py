@@ -270,12 +270,12 @@ class AutomationPropertyEditor(QWidget):
             return
 
         if isinstance(settings, PreTimePointTriggerSettings):
-            self._add_time_state_combo(
+            self._add_pre_time_point_state_combo(
                 section.form,
                 "目标状态",
                 settings,
                 "TargetState",
-                hint="选择要提前监听的状态，例如 OnClass 表示上课前。",
+                hint="选择要提前监听的状态，例如“上课”表示上课前触发。",
             )
             self._add_double_spin(
                 section.form,
@@ -765,6 +765,34 @@ class AutomationPropertyEditor(QWidget):
         combo_add_item(combo, "AfterSchool", TimeState.AfterSchool)
 
         current = getattr(obj, attr, TimeState.OnClass)
+        idx = combo.findData(current)
+        combo.setCurrentIndex(max(0, idx))
+
+        def _on_changed(_):
+            setattr(obj, attr, combo_current_data(combo))
+            self.changed.emit()
+
+        combo.currentIndexChanged.connect(_on_changed)
+        form.addRow(self._make_label(title), FieldWidget(combo, hint))
+
+    def _add_pre_time_point_state_combo(
+            self,
+            form: QFormLayout,
+            title: str,
+            obj: Any,
+            attr: str,
+            hint: str = "",
+    ) -> None:
+        combo = ComboBox()
+        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        combo_add_item(combo, "上课", TimeState.OnClass)
+        combo_add_item(combo, "课间", TimeState.Breaking)
+        combo_add_item(combo, "放学", TimeState.AfterSchool)
+        allowed = {TimeState.OnClass, TimeState.Breaking, TimeState.AfterSchool}
+        current = getattr(obj, attr, TimeState.OnClass)
+        if current not in allowed:
+            current = TimeState.OnClass
+            setattr(obj, attr, current)
         idx = combo.findData(current)
         combo.setCurrentIndex(max(0, idx))
 

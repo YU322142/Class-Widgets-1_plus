@@ -70,7 +70,13 @@ class PreTimePointTrigger(TriggerBaseT[PreTimePointTriggerSettings]):
         now = self._get_now()
 
         try:
-            if bridge.CurrentState == self.Settings.TargetState:
+            target_state = self.Settings.TargetState
+
+            # 兼容旧版本错误 UI 保存出来的 PrepareOnClass
+            if target_state == TimeState.PrepareOnClass:
+                target_state = TimeState.OnClass
+
+            if bridge.CurrentState == target_state:
                 self.TriggerRevert()
                 return
 
@@ -79,7 +85,7 @@ class PreTimePointTrigger(TriggerBaseT[PreTimePointTriggerSettings]):
 
             target_start_time: timedelta | None = None
 
-            if self.Settings.TargetState == TimeState.AfterSchool:
+            if target_state == TimeState.AfterSchool:
                 class_plan = getattr(bridge, "CurrentClassPlan", None)
                 items = getattr(class_plan, "ValidTimeLayoutItems", None) or []
                 valid = [x for x in items if getattr(x, "TimeType", None) in (0, 1)]
@@ -91,9 +97,9 @@ class PreTimePointTrigger(TriggerBaseT[PreTimePointTriggerSettings]):
                     return
 
             else:
-                if self.Settings.TargetState == TimeState.OnClass:
+                if target_state == TimeState.OnClass:
                     target_item = getattr(bridge, "NextClassTimeLayoutItem", None)
-                elif self.Settings.TargetState == TimeState.Breaking:
+                elif target_state == TimeState.Breaking:
                     target_item = getattr(bridge, "NextBreakingTimeLayoutItem", None)
                 else:
                     target_item = None
@@ -105,7 +111,10 @@ class PreTimePointTrigger(TriggerBaseT[PreTimePointTriggerSettings]):
                 if target_start_time is None:
                     return
 
-            target_dt = _combine_date_and_timedelta(now, target_start_time - _seconds_safe(self.Settings.TimeSeconds))
+            target_dt = _combine_date_and_timedelta(
+                now,
+                target_start_time - _seconds_safe(self.Settings.TimeSeconds),
+            )
 
             if self.LastCheckTime is not None and self.LastCheckTime < target_dt <= now:
                 self.Trigger()

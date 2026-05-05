@@ -11,6 +11,7 @@ import sys
 import traceback
 from functools import lru_cache
 from shutil import copy
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import psutil
@@ -443,7 +444,8 @@ class ReminderEngine:
     def __init__(self) -> None:
         self.sent_events = {}
         self.last_day = None
-        self.tolerance_seconds = 1.2
+        self.last_check: Optional[dt.datetime] = None
+        self.schedule_signature: Optional[str] = None
         self.keep_seconds = 24 * 60 * 60
 
     def _reset_if_new_day(self, now: dt.datetime) -> None:
@@ -451,6 +453,30 @@ class ReminderEngine:
         if self.last_day != day_key:
             self.last_day = day_key
             self.sent_events.clear()
+            self.last_check = now
+            self.schedule_signature = self._get_schedule_signature()
+
+    def _get_schedule_signature(self) -> str:
+        try:
+            day_schedule = get_schedule_map().get(str(current_week), [])
+        except Exception:
+            day_schedule = []
+
+        payload = {
+            "week": current_week,
+            "timeline": get_timeline_data(),
+            "part": loaded_data.get("part", {}) if isinstance(loaded_data, dict) else {},
+            "part_name": loaded_data.get("part_name", {}) if isinstance(loaded_data, dict) else {},
+            "schedule": day_schedule,
+        }
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+
+    def _reset_if_schedule_changed(self, now: dt.datetime) -> None:
+        signature = self._get_schedule_signature()
+        if self.schedule_signature != signature:
+            self.schedule_signature = signature
+            self.sent_events.clear()
+            self.last_check = now
 
     def _prune(self, now: dt.datetime) -> None:
         now_ts = now.timestamp()
@@ -462,74 +488,50 @@ class ReminderEngine:
             self.sent_events.pop(k, None)
 
     def _send_once(self, key: str, sender) -> bool:
-        now = TimeManagerFactory.get_instance().get_current_time_without_ms()
-        ts = now.timestamp()
+        ts = TimeManagerFactory.get_instance().get_current_time_without_ms().timestamp()
         if key in self.sent_events:
             return False
         self.sent_events[key] = ts
         sender()
         return True
 
-    def _build_class_blocks(self):
-        """构建当天所有课程块（仅非课间）"""
-        blocks = []
+    def _build_all_blocks(self):
+        return _build_today_timeline_blocks()
+
+    def _next_valid_lesson_from_index(self, blocks, start_index: int):
         no_lesson_text = QCoreApplication.translate('main', '暂无课程')
-
-        if not parts_start_time or not order:
-            return blocks
-
-        for idx, part_name in enumerate(order):
-            if idx >= len(parts_start_time):
+        for j in range(start_index + 1, len(blocks)):
+            block = blocks[j]
+            if block.get("isbreak"):
                 continue
-
-            start_cursor = parts_start_time[idx]
-            part_items = [x for x in timeline_data if str(x[1]) == str(part_name)]
-            if not part_items:
-                continue
-
-            for isbreak, item_name, item_index, item_time in part_items:
-                try:
-                    minutes = int(item_time)
-                except Exception:
-                    minutes = 0
-
-                item_start = start_cursor
-                item_end = start_cursor + dt.timedelta(minutes=minutes)
-
-                if not isbreak:
-                    lesson_name = current_lessons.get(
-                        (isbreak, item_name, item_index),
-                        no_lesson_text
-                    )
-                    blocks.append({
-                        'part': str(part_name),
-                        'item_name': str(item_name),
-                        'item_index': item_index,
-                        'start': item_start,
-                        'end': item_end,
-                        'lesson_name': lesson_name,
-                    })
-
-                start_cursor = item_end
-
-        blocks.sort(key=lambda x: x['start'])
-        return blocks
-
-    def _next_valid_lesson(self, blocks, idx: int):
-        no_lesson_text = QCoreApplication.translate('main', '暂无课程')
-        for j in range(idx + 1, len(blocks)):
-            name = blocks[j]['lesson_name']
+            name = block.get("lesson_name", "")
             if name and name != no_lesson_text:
                 return name
-        return None
+        return ""
+
+    def _crossed(self, target: dt.datetime, now: dt.datetime) -> bool:
+        if self.last_check is None:
+            return False
+        return self.last_check < target <= now
 
     def process(self, now: dt.datetime) -> None:
-        """处理提醒触发"""
+        """
+        处理提醒触发：
+        - 使用 crossing 检测，抗 timer 抖动 / 时间跳跃
+        - 放学提醒只在“当天最后一个时间块结束时”触发
+        - 不再把“没有下一节课”直接当成“放学”
+        """
         self._reset_if_new_day(now)
+        self._reset_if_schedule_changed(now)
         self._prune(now)
 
-        blocks = self._build_class_blocks()
+        blocks = self._build_all_blocks()
+        if self.last_check is None:
+            self.last_check = now
+            return
+
         if not blocks:
+            self.last_check = now
             return
 
         no_lesson_text = QCoreApplication.translate('main', '暂无课程')
@@ -545,47 +547,57 @@ class ReminderEngine:
         except Exception:
             prepare_minutes = 0
 
-        for idx, block in enumerate(blocks):
-            lesson_name = block['lesson_name']
-            start_time = block['start']
-            end_time = block['end']
+        try:
+            # 1) 预备铃 / 上课铃 / 下课铃：仅对“课程块”处理
+            for idx, block in enumerate(blocks):
+                if block.get("isbreak"):
+                    continue
 
-            valid_lesson = bool(lesson_name) and lesson_name != no_lesson_text
+                lesson_name = block['lesson_name']
+                start_time = block['start']
+                end_time = block['end']
+                valid_lesson = bool(lesson_name) and lesson_name != no_lesson_text
 
-            # 预备提醒
-            if prepare_enabled and prepare_minutes > 0 and valid_lesson:
-                prepare_time = start_time - dt.timedelta(minutes=prepare_minutes)
-                if is_time_reached(now, prepare_time):
-                    key = f"prepare|{start_time.strftime('%Y-%m-%d %H:%M:%S')}|{lesson_name}"
+                # 预备提醒
+                if prepare_enabled and prepare_minutes > 0 and valid_lesson:
+                    prepare_time = start_time - dt.timedelta(minutes=prepare_minutes)
+                    if self._crossed(prepare_time, now):
+                        key = f"prepare|{start_time.strftime('%Y-%m-%d %H:%M:%S')}|{lesson_name}"
+                        self._send_once(
+                            key,
+                            lambda ln=lesson_name: notification.push_notification(3, ln)
+                        )
+
+                # 上课提醒
+                if attend_enabled and valid_lesson and self._crossed(start_time, now):
+                    key = f"start|{start_time.strftime('%Y-%m-%d %H:%M:%S')}|{lesson_name}"
                     self._send_once(
                         key,
-                        lambda ln=lesson_name: notification.push_notification(3, ln)
+                        lambda ln=lesson_name: notification.push_notification(1, ln)
                     )
 
-            # 上课提醒
-            if attend_enabled and valid_lesson and is_time_reached(now, start_time):
-                key = f"start|{start_time.strftime('%Y-%m-%d %H:%M:%S')}|{lesson_name}"
-                self._send_once(
-                    key,
-                    lambda ln=lesson_name: notification.push_notification(1, ln)
-                )
-
-            # 下课 / 放学提醒
-            if is_time_reached(now, end_time):
-                next_lesson_name = self._next_valid_lesson(blocks, idx)
-
-                if next_lesson_name and finish_enabled:
+                # 下课提醒：
+                # 只要这节课结束后“当天还有后续时间块”，就应该是下课，而不是放学
+                has_future_blocks = (idx + 1) < len(blocks)
+                if finish_enabled and has_future_blocks and self._crossed(end_time, now):
+                    next_lesson_name = self._next_valid_lesson_from_index(blocks, idx)
                     key = f"end|{end_time.strftime('%Y-%m-%d %H:%M:%S')}|{next_lesson_name}"
                     self._send_once(
                         key,
                         lambda ln=next_lesson_name: notification.push_notification(0, ln)
                     )
-                elif not next_lesson_name and after_school_enabled:
-                    key = f"after_school|{end_time.strftime('%Y-%m-%d %H:%M:%S')}"
-                    self._send_once(
-                        key,
-                        lambda: notification.push_notification(2)
-                    )
+
+            # 2) 放学提醒：
+            # 只在“当天最后一个时间块结束”时触发
+            day_end = blocks[-1]["end"]
+            if after_school_enabled and self._crossed(day_end, now):
+                key = f"after_school|{day_end.strftime('%Y-%m-%d %H:%M:%S')}"
+                self._send_once(
+                    key,
+                    lambda: notification.push_notification(2)
+                )
+        finally:
+            self.last_check = now
 
 
 # 获取倒计时、弹窗提示
@@ -859,10 +871,124 @@ def _normalize_tray_menu_separators(tray_menu) -> None:
     except Exception as e:
         logger.debug(f'整理托盘菜单分隔线失败: {e}')
 
+def _to_day_timedelta(value: Any) -> dt.timedelta:
+    if isinstance(value, dt.timedelta):
+        return value
+    if isinstance(value, dt.datetime):
+        value = value.time()
+    if isinstance(value, dt.time):
+        return dt.timedelta(
+            hours=value.hour,
+            minutes=value.minute,
+            seconds=value.second,
+            microseconds=value.microsecond,
+        )
+    raise TypeError(f"Unsupported time value: {value!r}")
+
+
+def _make_bridge_time_layout_item(block: Dict[str, Any]) -> SimpleNamespace:
+    return SimpleNamespace(
+        StartTime=_to_day_timedelta(block["start"]),
+        EndTime=_to_day_timedelta(block["end"]),
+        TimeType=1 if block.get("isbreak") else 0,
+        IsBreak=bool(block.get("isbreak")),
+        Part=str(block.get("part", "")),
+        ItemName=str(block.get("item_name", "")),
+        ItemIndex=int(block.get("item_index", 0)),
+    )
+
+
+def _build_today_timeline_blocks() -> List[Dict[str, Any]]:
+    """
+    构建当天完整时间线块。
+    包含上课块和课间块，供 automation lessons bridge / reminder 共用。
+    """
+    blocks: List[Dict[str, Any]] = []
+    no_lesson_text = QCoreApplication.translate("main", "暂无课程")
+    break_text = QCoreApplication.translate("main", "课间")
+
+    if not parts_start_time or not order:
+        return blocks
+
+    part_name_map = loaded_data.get("part_name", {}) if isinstance(loaded_data, dict) else {}
+
+    for idx, part_name in enumerate(order):
+        if idx >= len(parts_start_time):
+            continue
+
+        start_cursor = parts_start_time[idx]
+        part_items = [x for x in timeline_data if str(x[1]) == str(part_name)]
+        if not part_items:
+            continue
+
+        for isbreak, item_name, item_index, item_time in part_items:
+            try:
+                minutes = int(item_time)
+            except Exception:
+                minutes = 0
+
+            item_start = start_cursor
+            item_end = start_cursor + dt.timedelta(minutes=minutes)
+
+            if isbreak:
+                lesson_name = part_name_map.get(str(part_name), break_text)
+            else:
+                lesson_name = current_lessons.get(
+                    (isbreak, item_name, item_index),
+                    no_lesson_text,
+                )
+
+            blocks.append(
+                {
+                    "part": str(part_name),
+                    "item_name": str(item_name),
+                    "item_index": int(item_index),
+                    "start": item_start,
+                    "end": item_end,
+                    "lesson_name": lesson_name,
+                    "isbreak": bool(isbreak),
+                    "time_type": 1 if isbreak else 0,
+                }
+            )
+
+            start_cursor = item_end
+
+    blocks.sort(key=lambda x: x["start"])
+    return blocks
+
+
+def _select_bridge_blocks(
+    now: dt.datetime,
+    blocks: List[Dict[str, Any]],
+) -> Tuple[
+    Optional[Dict[str, Any]],
+    Optional[Dict[str, Any]],
+    Optional[Dict[str, Any]],
+    Optional[Dict[str, Any]],
+]:
+    current_block: Optional[Dict[str, Any]] = None
+    previous_class_block: Optional[Dict[str, Any]] = None
+    next_class_block: Optional[Dict[str, Any]] = None
+    next_break_block: Optional[Dict[str, Any]] = None
+
+    for block in blocks:
+        if not block["isbreak"] and block["end"] <= now:
+            previous_class_block = block
+
+        if current_block is None and block["start"] <= now < block["end"]:
+            current_block = block
+
+        if next_class_block is None and (not block["isbreak"]) and block["start"] >= now:
+            next_class_block = block
+
+        if next_break_block is None and block["isbreak"] and block["start"] >= now:
+            next_break_block = block
+
+    return current_block, previous_class_block, next_class_block, next_break_block
 
 
 def push_lessons_state_to_automation() -> None:
-    global automation_runtime
+    global automation_runtime, current_state
 
     if automation_runtime is None:
         return
@@ -879,19 +1005,85 @@ def push_lessons_state_to_automation() -> None:
 
         bridge._emit(bridge._pre_main_timer_ticked_handlers)
 
+        now = TimeManagerFactory.get_instance().get_current_time()
+        current_part_data = get_part()
+        blocks = _build_today_timeline_blocks()
+
+        current_block, previous_class_block, next_class_block, next_break_block = _select_bridge_blocks(
+            now, blocks
+        )
+
         from automation.enums import TimeState
 
+        # 这里必须优先尊重主程序 current_state 的原始语义：
+        # 0 = 普通课间
+        # 1 = 上课
+        # 2 = 休息段（不是放学）
         if current_state == 1:
             new_state = TimeState.OnClass
-        elif current_state == 0:
-            new_state = TimeState.Breaking
-        else:
+        elif current_state == 2:
             new_state = TimeState.None_
+        elif current_state == 0:
+            if current_block is not None and bool(current_block.get("isbreak")):
+                new_state = TimeState.Breaking
+            elif current_part_data is None and blocks and now >= blocks[-1]["end"]:
+                new_state = TimeState.AfterSchool
+            else:
+                new_state = TimeState.None_
+        else:
+            if current_part_data is None and blocks and now >= blocks[-1]["end"]:
+                new_state = TimeState.AfterSchool
+            else:
+                new_state = TimeState.None_
 
-        bridge.UpdateCurrentState(new_state)
+        bridge.CurrentClassPlan = (
+            SimpleNamespace(
+                ValidTimeLayoutItems=[
+                    _make_bridge_time_layout_item(block) for block in blocks
+                ]
+            )
+            if blocks
+            else None
+        )
+
+        bridge.CurrentTimeLayoutItem = (
+            _make_bridge_time_layout_item(current_block)
+            if current_block is not None
+            else None
+        )
+        bridge.NextClassTimeLayoutItem = (
+            _make_bridge_time_layout_item(next_class_block)
+            if next_class_block is not None
+            else None
+        )
+        bridge.NextBreakingTimeLayoutItem = (
+            _make_bridge_time_layout_item(next_break_block)
+            if next_break_block is not None
+            else None
+        )
 
         bridge.CurrentSubject = current_lesson_name
         bridge.NextClassSubject = next_lessons[0] if next_lessons else None
+        bridge.PreviousSubject = (
+            previous_class_block["lesson_name"]
+            if previous_class_block is not None
+            else None
+        )
+
+        bridge.OnClassLeftTime = (
+            max(dt.timedelta(0), next_class_block["start"] - now)
+            if new_state != TimeState.OnClass and next_class_block is not None
+            else dt.timedelta(0)
+        )
+
+        bridge.OnBreakingTimeLeftTime = (
+            max(dt.timedelta(0), current_block["end"] - now)
+            if new_state == TimeState.OnClass and current_block is not None
+            else dt.timedelta(0)
+        )
+
+        bridge.CurrentOverlayStatus = new_state
+        bridge.UpdateCurrentState(new_state)
 
         bridge._emit(bridge._post_main_timer_ticked_handlers)
     except Exception as e:

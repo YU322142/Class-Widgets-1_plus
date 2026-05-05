@@ -420,7 +420,7 @@ def _get_current_time_state() -> TimeState:
     再退回主程序旧 current_state 数值语义：
     - 1 => OnClass
     - 0 => Breaking
-    - 2 => AfterSchool（近似）
+    - 2 => None_（休息段，不能近似成 AfterSchool）
     """
     bridge = _get_lessons_bridge()
     if bridge is not None and hasattr(bridge, "CurrentState"):
@@ -440,8 +440,8 @@ def _get_current_time_state() -> TimeState:
         LOGGER.debug("TimeState resolved from main.current_state=0 -> Breaking")
         return TimeState.Breaking
     if raw == 2:
-        LOGGER.debug("TimeState resolved from main.current_state=2 -> AfterSchool")
-        return TimeState.AfterSchool
+        LOGGER.debug("TimeState resolved from main.current_state=2 -> None_ (rest part)")
+        return TimeState.None_
 
     try:
         state = TimeState.from_value(raw)
@@ -450,6 +450,7 @@ def _get_current_time_state() -> TimeState:
     except Exception:
         LOGGER.debug(f"TimeState unresolved, raw={raw!r}, fallback=None_")
         return TimeState.None_
+
 def _get_weather_now_payload() -> dict:
     """
     你的 weather.py 返回结构是：

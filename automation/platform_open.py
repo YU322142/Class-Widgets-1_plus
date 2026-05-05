@@ -1,26 +1,12 @@
-# automation/platform_open.py
-"""
-跨平台打开操作 —— 对齐 ClassIsland RunAction 的行为。
-
-ClassIsland 的核心策略非常简洁：
-  - Application / File / Folder: Process.Start + UseShellExecute = true
-  - Url:  Windows用 ShellExecute，Linux 用 xdg-open，macOS 用 open
-  - Command: cmd.exe /c 或 /bin/bash -c
-
-本模块用Python 等效方式复现上述行为。
-"""
 from __future__ import annotations
 
+import ctypes
 import os
 import shlex
 import subprocess
 import sys
 from typing import Sequence
 
-
-#============================================================
-# 内部工具
-# ============================================================
 
 def _debug(logger, message: str) -> None:
     if logger is not None:
@@ -31,7 +17,6 @@ def _debug(logger, message: str) -> None:
 
 
 def _normalize_url(url: str) -> str:
-    """与 ClassIsland 完全一致的 URL 规范化逻辑。"""
     url = (url or "").strip()
     if not url:
         return url
@@ -40,90 +25,126 @@ def _normalize_url(url: str) -> str:
     return url
 
 
-def _shell_execute_win(file: str, args: str | None = None, logger=None) -> None:
+def _build_external_env() -> dict[str, str]:
     """
-    Windows:调用 ShellExecuteW，等效于 .NET 的
-    Process.Start(new ProcessStartInfo { FileName=..., Arguments=..., UseShellExecute=true })
+    为外部系统程序构造“干净”的环境。
+    重点解决 Linux 便携/单文件包把自己的运行时环境污染给 xdg-open / 浏览器 / 文件管理器的问题。
+    """
+    env = os.environ.copy()
 
-    可以打开：- 普通 exe /带空格路径的 exe
-      - .lnk 快捷方式
-      - UWP / MSIX 应用
-      - URL 协议 (https://, ms-settings:等)
-      - 任意已注册文件类型
-    """
-    import ctypes
-    _debug(logger, f"[platform_open] ShellExecuteW file={file!r} args={args!r}")
-    ret = ctypes.windll.shell32.ShellExecuteW(None, "open", file, args, None, 1)
-    # ShellExecuteW 返回值> 32 表示成功
+    if sys.platform.startswith("linux"):
+        for key in (
+            "LD_LIBRARY_PATH",
+            "PYTHONHOME",
+            "PYTHONPATH",
+            "QT_PLUGIN_PATH",
+            "QML2_IMPORT_PATH",
+            "GI_TYPELIB_PATH",
+            "GTK_PATH",
+            "GIO_EXTRA_MODULES",
+            "APPDIR",
+            "APPIMAGE",
+            "ARGV0",
+        ):
+            env.pop(key, None)
+
+        # 对 PyInstaller onefile / 类似环境更友好；即使不是 PyInstaller，一般也无害
+        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+
+    return env
+
+
+def _shell_execute_win(file: str, parameters: str | None = None, logger=None) -> None:
+    _debug(logger, f"[platform_open] ShellExecuteW file={file!r} args={parameters!r}")
+    ret = ctypes.windll.shell32.ShellExecuteW(None, "open", file, parameters, None, 1)
     if ret <= 32:
-        raise RuntimeError(f"ShellExecuteW 失败 (返回值={ret})，file={file!r} args={args!r}")
+        raise RuntimeError(
+            f"ShellExecuteW failed: code={ret}, file={file!r}, args={parameters!r}"
+        )
 
 
-# ============================================================
-# 公共 API
-# ============================================================
+def _try_spawn_command(
+    args: Sequence[str],
+    *,
+    logger=None,
+    env: dict[str, str] | None = None,
+    settle_seconds: float = 0.8,
+) -> bool:
+    try:
+        _debug(logger, f"[platform_open] trying command: {list(args)!r}")
+        proc = subprocess.Popen(
+            list(args),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            start_new_session=(os.name != "nt"),
+        )
+    except FileNotFoundError:
+        _debug(logger, f"[platform_open] command not found: {list(args)!r}")
+        return False
+    except Exception as e:
+        _debug(logger, f"[platform_open] command exception: {list(args)!r}, err={e}")
+        return False
 
-def open_application(path: str, args: str = "", logger=None) -> None:
-    """
-    运行应用程序。对齐 ClassIsland:
-      Process.Start(new ProcessStartInfo {FileName = path,
-          Arguments = args,
-          UseShellExecute = true
-      });
-    """
-    path = str(path or "").strip()
-    if not path:
-        raise RuntimeError("应用程序路径为空，无法运行。")
+    try:
+        rc = proc.wait(timeout=settle_seconds)
+    except subprocess.TimeoutExpired:
+        _debug(logger, f"[platform_open] command assumed success (still running): {list(args)!r}")
+        return True
 
-    args = str(args or "").strip()
+    if rc == 0:
+        _debug(logger, f"[platform_open] command success: {list(args)!r}")
+        return True
 
-    _debug(logger, f"[platform_open] open_application path={path!r} args={args!r}")
+    _debug(logger, f"[platform_open] command failed rc={rc}: {list(args)!r}")
+    return False
 
+
+def _linux_shell_open_candidates(target: str) -> list[list[str]]:
+    return [
+        ["xdg-open", target],
+        ["gio", "open", target],
+        ["kioclient5", "exec", target],
+        ["kioclient", "exec", target],
+        ["gvfs-open", target],
+    ]
+
+
+def _linux_url_candidates(url: str) -> list[list[str]]:
+    return [
+        ["xdg-open", url],
+        ["gio", "open", url],
+        ["sensible-browser", url],
+        ["x-www-browser", url],
+        ["firefox", url],
+        ["chromium", url],
+        ["chromium-browser", url],
+        ["google-chrome", url],
+        ["microsoft-edge", url],
+        ["opera", url],
+    ]
+
+
+def _open_with_system_default(target: str, logger=None) -> None:
     if sys.platform == "win32":
-        # UseShellExecute = true 等效
-        _shell_execute_win(path, args if args else None, logger=logger)
-    else:
-        # Linux / macOS: 直接 exec，参数需要自己拆分
-        argv = [path]
-        if args:
-            argv.extend(shlex.split(args))
-        _debug(logger, f"[platform_open] Popen argv={argv!r}")
-        subprocess.Popen(argv)
+        _shell_execute_win(target, logger=logger)
+        return
 
+    env = _build_external_env()
 
-def open_file(path: str, logger=None) -> None:
-    """
-    打开文件。对齐 ClassIsland:
-      Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
-    """
-    path = str(path or "").strip()
-    if not path:
-        raise RuntimeError("文件路径为空，无法打开。")
+    if sys.platform == "darwin":
+        if _try_spawn_command(["open", target], logger=logger, env=env):
+            return
+        raise RuntimeError(f"无法通过 open 打开目标：{target}")
 
-    _debug(logger, f"[platform_open] open_file path={path!r}")
-    _shell_open(path, logger=logger)
+    for cmd in _linux_shell_open_candidates(target):
+        if _try_spawn_command(cmd, logger=logger, env=env):
+            return
 
-
-def open_folder(path: str, logger=None) -> None:
-    """
-    打开文件夹。对齐 ClassIsland (与 open_file 完全相同):
-      Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
-    """
-    path = str(path or "").strip()
-    if not path:
-        raise RuntimeError("文件夹路径为空，无法打开。")
-
-    _debug(logger, f"[platform_open] open_folder path={path!r}")
-    _shell_open(path, logger=logger)
+    raise RuntimeError(f"无法通过系统默认程序打开目标：{target}")
 
 
 def open_url(url: str, logger=None) -> None:
-    """
-    打开 URL。对齐 ClassIsland:
-      Windows: Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
-      Linux:Process.Start(new ProcessStartInfo("xdg-open", path) { UseShellExecute = false });
-      macOS:   Process.Start(new ProcessStartInfo("open", path) { UseShellExecute = false });
-    """
     url = _normalize_url(url)
     if not url:
         raise RuntimeError("URL 为空，无法打开。")
@@ -132,25 +153,92 @@ def open_url(url: str, logger=None) -> None:
 
     if sys.platform == "win32":
         _shell_execute_win(url, logger=logger)
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", url])
-    else:
-        # Linux —— 与 ClassIsland 完全一致：直接 xdg-open
-        subprocess.Popen(["xdg-open", url])
+        return
+
+    env = _build_external_env()
+
+    if sys.platform == "darwin":
+        if _try_spawn_command(["open", url], logger=logger, env=env):
+            return
+        raise RuntimeError(f"无法打开 URL：{url}")
+
+    for cmd in _linux_url_candidates(url):
+        if _try_spawn_command(cmd, logger=logger, env=env):
+            return
+
+    raise RuntimeError(f"无法打开 URL：{url}")
 
 
-# ============================================================
-# 内部：统一的 shell-open（File / Folder 共用）
-# ============================================================
+def open_file(path: str, logger=None) -> None:
+    path = str(path or "").strip()
+    if not path:
+        raise RuntimeError("文件路径为空，无法打开。")
 
-def _shell_open(path: str, logger=None) -> None:
-    """
-    等效于 .NET Process.Start + UseShellExecute = true。
-    """
+    _debug(logger, f"[platform_open] open_file path={path!r}")
+    _open_with_system_default(path, logger=logger)
+
+
+def open_folder(path: str, logger=None) -> None:
+    path = str(path or "").strip()
+    if not path:
+        raise RuntimeError("文件夹路径为空，无法打开。")
+
+    _debug(logger, f"[platform_open] open_folder path={path!r}")
+    _open_with_system_default(path, logger=logger)
+
+
+def open_application(path: str, args: str = "", logger=None) -> None:
+    path = str(path or "").strip()
+    if not path:
+        raise RuntimeError("应用程序路径为空，无法运行。")
+
+    args = str(args or "").strip()
+    _debug(logger, f"[platform_open] open_application path={path!r} args={args!r}")
+
     if sys.platform == "win32":
-        _shell_execute_win(path, logger=logger)
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", path])
-    else:
-        # Linux —— 与 ClassIsland 一致
-        subprocess.Popen(["xdg-open", path])
+        _shell_execute_win(path, args or None, logger=logger)
+        return
+
+    env = _build_external_env()
+
+    if sys.platform == "darwin" and (path.lower().endswith(".app") or os.path.isdir(path)):
+        cmd = ["open", path]
+        if args:
+            try:
+                cmd.append("--args")
+                cmd.extend(shlex.split(args))
+            except Exception as e:
+                raise RuntimeError(f"无法解析应用程序参数：{args!r}，错误：{e}") from e
+
+        if _try_spawn_command(cmd, logger=logger, env=env):
+            return
+
+        raise RuntimeError(f"无法启动应用程序：{path}")
+
+    argv = [path]
+    if args:
+        try:
+            argv.extend(shlex.split(args))
+        except Exception as e:
+            raise RuntimeError(f"无法解析应用程序参数：{args!r}，错误：{e}") from e
+
+    try:
+        _debug(logger, f"[platform_open] Popen argv={argv!r}")
+        subprocess.Popen(
+            argv,
+            env=env,
+            start_new_session=(os.name != "nt"),
+        )
+        return
+    except FileNotFoundError as e:
+        _debug(logger, f"[platform_open] direct exec not found: {argv!r}, err={e}")
+        if not args:
+            _open_with_system_default(path, logger=logger)
+            return
+        raise RuntimeError(f"找不到应用程序：{path}") from e
+    except OSError as e:
+        _debug(logger, f"[platform_open] direct exec failed: {argv!r}, err={e}")
+        if not args:
+            _open_with_system_default(path, logger=logger)
+            return
+        raise RuntimeError(f"启动应用程序失败：{path}，错误：{e}") from e
