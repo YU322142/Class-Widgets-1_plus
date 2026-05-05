@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import list_
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QListWidgetItem,
     QMessageBox,
     QSpinBox,
@@ -44,6 +44,7 @@ from automation.models import (
     Workflow,
 )
 from automation.registry import get_registered_rule_ids, get_rule_info
+from file import config_center
 
 
 RULE_GROUPS: dict[str, list[str]] = {
@@ -76,11 +77,11 @@ RULE_DESCRIPTIONS: dict[str, str] = {
     "classisland.windows.text": "前台窗口标题匹配。",
     "classisland.windows.status": "前台窗口状态是否为正常 / 最大化 / 最小化 / 全屏。",
     "classisland.windows.processName": "前台窗口进程名匹配。",
-    "classisland.lessons.currentSubject": "当前课程科目匹配。",
-    "classisland.lessons.nextSubject": "下节课科目匹配。",
-    "classisland.lessons.previousSubject": "上节课科目匹配。",
+    "classisland.lessons.currentSubject": "当前课程科目匹配（CW 当前按科目显示名称比较，不是 CI 的科目对象语义）。",
+    "classisland.lessons.nextSubject": "下节课科目匹配（CW 当前按科目显示名称比较）。",
+    "classisland.lessons.previousSubject": "上节课科目匹配（CW 当前按科目显示名称比较）。",
     "classisland.lessons.timeState": "当前时间状态匹配。",
-    "classisland.weather.currentWeather": "当前天气类型匹配。",
+    "classisland.weather.currentWeather": "当前天气类型匹配（当前实现按精确天气代码比较）。",
     "classisland.weather.hasWeatherAlert": "天气预警文本匹配。",
     "classisland.weather.rainTime": "距离下雨开始/结束的时间范围判断。",
     "classisland.weather.sunRiseSet": "当前是否日出后 / 日落后。",
@@ -135,17 +136,15 @@ class RulePickerDialog(QDialog):
         self.setWindowTitle("选择规则")
         self.resize(760, 480)
         self.selected_rule_id: str | None = None
-        self.setStyleSheet("QDialog { background: white; }")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 20, 20, 20)
         root.setSpacing(12)
 
         title = StrongBodyLabel("选择规则")
-        title.setStyleSheet("font-size: 16px; font-weight: 600;")
         root.addWidget(title)
 
-        tip = BodyLabel("先选择左侧分组，再选择右侧具体规则。")
+        tip = CaptionLabel("先选择左侧分组，再选择右侧具体规则。")
         tip.setWordWrap(True)
         tip.setStyleSheet("color: #666;")
         root.addWidget(tip)
@@ -160,15 +159,16 @@ class RulePickerDialog(QDialog):
         body.addWidget(self.group_list, 2)
         body.addWidget(self.rule_list, 4)
 
-        self.desc_label = BodyLabel("请选择一个规则后，这里会显示它的用途。")
+        self.desc_label = CaptionLabel("请选择一个规则后，这里会显示它的用途。")
         self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet("color: #444;")
+        self.desc_label.setStyleSheet("color: #666;")
         root.addWidget(self.desc_label)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
         self.ok_btn = PushButton("确定")
         self.cancel_btn = PushButton("取消")
+        self.ok_btn.setEnabled(False)
         btn_row.addWidget(self.ok_btn)
         btn_row.addWidget(self.cancel_btn)
         root.addLayout(btn_row)
@@ -205,6 +205,7 @@ class RulePickerDialog(QDialog):
     def _on_group_changed(self, row: int) -> None:
         self.rule_list.clear()
         self.desc_label.setText("请选择一个规则后，这里会显示它的用途。")
+        self.ok_btn.setEnabled(False)
 
         if row < 0:
             return
@@ -226,10 +227,12 @@ class RulePickerDialog(QDialog):
         item = self.rule_list.item(row)
         if item is None:
             self.desc_label.setText("请选择一个规则后，这里会显示它的用途。")
+            self.ok_btn.setEnabled(False)
             return
 
         rule_id = item.data(Qt.UserRole)
         self.desc_label.setText(RULE_DESCRIPTIONS.get(rule_id, f"规则 ID：{rule_id}"))
+        self.ok_btn.setEnabled(True)
 
     def _accept_current(self) -> None:
         item = self.rule_list.currentItem()
@@ -272,7 +275,7 @@ class RulesetEditor(QWidget):
         combo_add_item(self.mode_combo, "所有组都要满足（AND）", RulesetLogicalMode.And)
 
         self.reverse_box = CheckBox("反转整个规则集结果")
-        global_row.addWidget(QLabel("规则集逻辑"))
+        global_row.addWidget(BodyLabel("规则集逻辑"))
         global_row.addWidget(self.mode_combo, 1)
         global_row.addWidget(self.reverse_box)
         root.addLayout(global_row)
@@ -320,7 +323,7 @@ class RulesetEditor(QWidget):
         left_layout.addWidget(self.group_reverse_box)
 
         mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("组逻辑"))
+        mode_row.addWidget(BodyLabel("组逻辑"))
         self.group_mode_combo = ComboBox()
         combo_add_item(self.group_mode_combo, "任意规则满足即可（OR）", RulesetLogicalMode.Or)
         combo_add_item(self.group_mode_combo, "所有规则都要满足（AND）", RulesetLogicalMode.And)
@@ -579,7 +582,7 @@ class RulesetEditor(QWidget):
         self.rule_reverse_box.blockSignals(False)
 
         if rule.Id == "":
-            self.settings_form.addRow(QLabel("当前规则尚未指定类型，请点击“更换规则类型”或“添加规则”。"))
+            self._add_note("当前规则尚未指定类型，请点击“更换规则类型”或“添加规则”。")
             return
 
         settings = rule.Settings
@@ -595,12 +598,13 @@ class RulesetEditor(QWidget):
             return
 
         if isinstance(settings, CurrentSubjectRuleSettings):
-            self._add_line_edit("SubjectId", settings, "SubjectId")
-            self.settings_form.addRow(QLabel("当前版本先以 SubjectId 文本编辑，后续可接入真实科目下拉选择。"))
+            self._add_subject_combo("科目", settings, "SubjectId")
+            self._add_note("说明：CW 当前按“科目显示名称”匹配，不是 ClassIsland 的 SubjectId / 科目对象语义。")
             return
 
         if isinstance(settings, CurrentWeatherRuleSettings):
-            self._add_int_spin("WeatherId", settings, "WeatherId", 0, 999)
+            self._add_current_weather_combo("天气", settings, "WeatherId")
+            self._add_note("说明：当前实现按精确天气代码匹配；ClassIsland 的“包含相似天气”在 CW 当前设计下暂无等价安全实现，因此这次不改 backend 语义。")
             return
 
         if isinstance(settings, RainTimeRuleSettings):
@@ -621,7 +625,7 @@ class RulesetEditor(QWidget):
             self._add_window_state_combo("窗口状态", settings, "State")
             return
 
-        self.settings_form.addRow(QLabel("该规则的设置编辑器尚未实现。"))
+        self._add_note("该规则的设置编辑器尚未实现。")
 
     def _current_group(self) -> RuleGroup | None:
         if self._workflow is None:
@@ -863,12 +867,18 @@ class RulesetEditor(QWidget):
     # Setting editors
     # =========================================================
 
-    def _label(self, text: str) -> QLabel:
+    def _label(self, text: str) -> BodyLabel:
         label = BodyLabel(text)
         label.setWordWrap(True)
         label.setMinimumWidth(112)
         label.setMaximumWidth(132)
         return label
+
+    def _add_note(self, text: str) -> None:
+        note = CaptionLabel(text)
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #666;")
+        self.settings_form.addRow(note)
 
     def _add_line_edit(self, title: str, obj: Any, attr: str) -> None:
         edit = LineEdit()
@@ -929,14 +939,177 @@ class RulesetEditor(QWidget):
         spin.valueChanged.connect(_on_changed)
         self.settings_form.addRow(self._label(title), spin)
 
+    def _load_subject_options(self) -> list[str]:
+        options: list[str] = []
+        try:
+            for name in list(getattr(list_, "class_kind", []))[1:]:
+                text = str(name).strip()
+                if text and text not in options:
+                    options.append(text)
+        except Exception:
+            pass
+        return options
+
+    def _add_subject_combo(self, title: str, obj: Any, attr: str) -> None:
+        combo = ComboBox()
+        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        try:
+            combo.setEditable(True)
+        except Exception:
+            pass
+
+        options = self._load_subject_options()
+        current = str(getattr(obj, attr, "") or "").strip()
+
+        if current and current not in options:
+            options.append(current)
+
+        for option in options:
+            combo_add_item(combo, option, option)
+
+        if current:
+            idx = combo.findData(current)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            else:
+                try:
+                    combo.setCurrentText(current)
+                except Exception:
+                    pass
+
+        def _commit_value(*_):
+            value = ""
+            try:
+                data = combo_current_data(combo)
+                if data not in (None, ""):
+                    value = str(data).strip()
+            except Exception:
+                pass
+
+            if not value:
+                try:
+                    value = str(combo.currentText()).strip()
+                except Exception:
+                    value = ""
+
+            setattr(obj, attr, value)
+            self._emit_changed()
+
+        combo.currentIndexChanged.connect(_commit_value)
+
+        try:
+            line_edit = combo.lineEdit()
+        except Exception:
+            line_edit = None
+
+        if line_edit is not None:
+            line_edit.textChanged.connect(lambda _text: _commit_value())
+
+        self.settings_form.addRow(self._label(title), combo)
+
+    def _load_weather_options(self) -> list[tuple[str, str]]:
+        options: list[tuple[str, str]] = []
+
+        try:
+            import weather as weather_module
+
+            api_name = config_center.read_conf("Weather", "api", None)
+            status_data = weather_module.weather_processor._load_weather_status(api_name)
+
+            for item in status_data.get("weatherinfo", []):
+                code = str(item.get("code", "")).strip()
+                if not code:
+                    continue
+                name = str(item.get("wea", code)).strip()
+                label = f"{name} ({code})"
+                if all(existing_code != code for existing_code, _ in options):
+                    options.append((code, label))
+        except Exception:
+            pass
+
+        return options
+
+    def _add_current_weather_combo(self, title: str, obj: Any, attr: str) -> None:
+        combo = ComboBox()
+        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        try:
+            combo.setEditable(True)
+        except Exception:
+            pass
+
+        options = self._load_weather_options()
+        current_raw = getattr(obj, attr, 0)
+        current_code = "" if current_raw is None else str(current_raw).strip()
+
+        for code, label in options:
+            combo_add_item(combo, label, code)
+
+        if current_code and all(code != current_code for code, _ in options):
+            combo_add_item(combo, f"当前值 ({current_code})", current_code)
+
+        if current_code:
+            idx = combo.findData(current_code)
+            combo.setCurrentIndex(max(0, idx))
+            try:
+                combo.setCurrentText(combo.itemText(idx) if idx >= 0 else current_code)
+            except Exception:
+                pass
+
+        def _commit_value(*_):
+            value = ""
+            try:
+                data = combo_current_data(combo)
+                if data not in (None, ""):
+                    value = str(data).strip()
+            except Exception:
+                pass
+
+            if not value:
+                try:
+                    value = str(combo.currentText()).strip()
+                except Exception:
+                    value = ""
+
+            if not value:
+                return
+
+            try:
+                setattr(obj, attr, int(value))
+            except Exception:
+                return
+
+            self._emit_changed()
+
+        combo.currentIndexChanged.connect(_commit_value)
+
+        try:
+            line_edit = combo.lineEdit()
+        except Exception:
+            line_edit = None
+
+        if line_edit is not None:
+            line_edit.textChanged.connect(lambda _text: _commit_value())
+
+        self.settings_form.addRow(self._label(title), combo)
+
     def _add_time_state_combo(self, title: str, obj: Any, attr: str) -> None:
         combo = ComboBox()
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        combo_add_item(combo, "None", TimeState.None_)
-        combo_add_item(combo, "OnClass", TimeState.OnClass)
-        combo_add_item(combo, "PrepareOnClass", TimeState.PrepareOnClass)
-        combo_add_item(combo, "Breaking", TimeState.Breaking)
-        combo_add_item(combo, "AfterSchool", TimeState.AfterSchool)
+        combo_add_item(combo, "无", TimeState.None_)
+        combo_add_item(combo, "上课", TimeState.OnClass)
+        combo_add_item(combo, "准备上课（当前不可用）", TimeState.PrepareOnClass)
+        combo_add_item(combo, "课间休息", TimeState.Breaking)
+        combo_add_item(combo, "放学后", TimeState.AfterSchool)
+
+        try:
+            model = combo.model()
+            item = model.item(2)
+            if item is not None:
+                item.setEnabled(False)
+        except Exception:
+            pass
 
         current = getattr(obj, attr, TimeState.OnClass)
         idx = combo.findData(current)
