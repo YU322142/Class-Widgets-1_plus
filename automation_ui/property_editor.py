@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
-    QWidget,
-    QSizePolicy,
+    QWidget,QSizePolicy,
 )
 from qfluentwidgets import (
     BodyLabel,
@@ -158,10 +161,9 @@ class AutomationPropertyEditor(QWidget):
         else:
             section = EditorSection("参数设置", "暂不支持此对象编辑。")
             self.content_layout.addWidget(section)
+            self.content_layout.addStretch(1)
 
-        self.content_layout.addStretch(1)
-
-    # =========================================================
+    #=========================================================
     # Workflow
     # =========================================================
 
@@ -196,9 +198,7 @@ class AutomationPropertyEditor(QWidget):
             workflow,
             "IsConditionEnabled",
             hint="启用后，只有规则集满足时工作流才会执行；不启用时将忽略规则集。",
-        )
-
-    # =========================================================
+        )# =========================================================
     # Trigger
     # =========================================================
 
@@ -221,7 +221,7 @@ class AutomationPropertyEditor(QWidget):
                 "信号名",
                 settings,
                 "SignalName",
-                hint="用于和“广播信号”动作配对。名称必须完全一致，例如 demo-signal。",
+                hint="用于和广播信号动作配对。名称必须完全一致，例如 demo-signal。",
             )
             self._add_checkbox(
                 section.form,
@@ -238,7 +238,7 @@ class AutomationPropertyEditor(QWidget):
                 "菜单标题",
                 settings,
                 "Header",
-                hint="显示在托盘菜单中的文字，例如“测试天气提醒”。",
+                hint="显示在托盘菜单中的文字，例如测试天气提醒。",
             )
             self._add_checkbox(
                 section.form,
@@ -275,7 +275,7 @@ class AutomationPropertyEditor(QWidget):
                 "目标状态",
                 settings,
                 "TargetState",
-                hint="选择要提前监听的状态，例如 OnClass 表示“上课前”。",
+                hint="选择要提前监听的状态，例如 OnClass 表示上课前。",
             )
             self._add_double_spin(
                 section.form,
@@ -314,7 +314,7 @@ class AutomationPropertyEditor(QWidget):
                 "Mask",
                 settings,
                 "Mask",
-                hint="短提示文字，通常显示在提醒的简要部分，例如“上课提醒”。",
+                hint="短提示文字，通常显示在提醒的简要部分，例如上课提醒。",
             )
             self._add_line_edit(
                 section.form,
@@ -409,48 +409,7 @@ class AutomationPropertyEditor(QWidget):
             return
 
         if isinstance(settings, RunActionSettings):
-            combo = ComboBox()
-            combo_add_item(combo, "应用程序", RunActionRunType.Application)
-            combo_add_item(combo, "命令", RunActionRunType.Command)
-            combo_add_item(combo, "文件", RunActionRunType.File)
-            combo_add_item(combo, "文件夹", RunActionRunType.Folder)
-            combo_add_item(combo, "URL", RunActionRunType.Url)
-
-            current_value = settings.RunType
-            idx = combo.findData(current_value)
-            combo.setCurrentIndex(max(0, idx))
-
-            def _on_changed(_):
-                settings.RunType = combo_current_data(combo)
-                self.changed.emit()
-
-            combo.currentIndexChanged.connect(_on_changed)
-            section.form.addRow(
-                self._make_label("运行类型"),
-                FieldWidget(combo, "先选择要运行的对象类型，例如应用程序、命令、文件、文件夹或 URL。"),
-            )
-
-            self._add_line_edit(
-                section.form,
-                "值",
-                settings,
-                "Value",
-                hint=(
-                    "这里填写主要目标：\n"
-                    "· 应用程序：填写 exe / 可执行文件路径\n"
-                    "· 命令：填写完整命令文本\n"
-                    "· 文件：填写文件路径\n"
-                    "· 文件夹：填写文件夹路径\n"
-                    "· URL：填写网页地址"
-                ),
-            )
-            self._add_line_edit(
-                section.form,
-                "参数",
-                settings,
-                "Args",
-                hint="主要用于“应用程序”类型；命令类型通常直接把完整命令写在“值”里。",
-            )
+            self._build_run_action_editor(section, settings)
             return
 
         if isinstance(settings, ModifyAppSettingsActionSettings):
@@ -499,7 +458,7 @@ class AutomationPropertyEditor(QWidget):
                 "信号名",
                 settings,
                 "SignalName",
-                hint="要广播的信号名称。其它 SignalTrigger 只有名称完全一致才会响应。",
+                hint="要广播的信号名称。其它SignalTrigger 只有名称完全一致才会响应。",
             )
             self._add_checkbox(
                 section.form,
@@ -516,11 +475,187 @@ class AutomationPropertyEditor(QWidget):
                 "静默重启",
                 settings,
                 "Value",
-                hint="勾选后按“静默重启”模式执行。是否完全静默取决于主程序实现。",
+                hint="勾选后按静默重启模式执行。是否完全静默取决于主程序实现。",
             )
             return
 
         section.form.addRow(QLabel("该动作设置编辑器尚未实现"))
+
+    # =========================================================
+    # RunAction 专用编辑器 —— 对齐 ClassIsland RunActionSettingsControl
+    # =========================================================
+
+    def _build_run_action_editor(self, section: EditorSection, settings: RunActionSettings) -> None:
+        #---- 运行类型下拉 ----
+        type_combo = ComboBox()
+        type_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        combo_add_item(type_combo, "应用程序", RunActionRunType.Application)
+        combo_add_item(type_combo, "命令", RunActionRunType.Command)
+        combo_add_item(type_combo, "文件", RunActionRunType.File)
+        combo_add_item(type_combo, "文件夹", RunActionRunType.Folder)
+        combo_add_item(type_combo, "URL", RunActionRunType.Url)
+
+        current_type = settings.RunType
+        idx = type_combo.findData(current_type)
+        type_combo.setCurrentIndex(max(0, idx))
+
+        section.form.addRow(
+            self._make_label("运行类型"),
+            FieldWidget(type_combo, "选择要运行的对象类型。"),
+        )
+
+        # ---- 值：输入框 +浏览按钮 ----
+        value_row = QWidget()
+        value_row_layout = QHBoxLayout(value_row)
+        value_row_layout.setContentsMargins(0, 0, 0, 0)
+        value_row_layout.setSpacing(6)
+
+        value_edit = LineEdit()
+        value_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        current_val = getattr(settings, "Value", "")
+        value_edit.setText("" if current_val is None else str(current_val))
+        value_row_layout.addWidget(value_edit)
+
+        browse_btn = QPushButton("浏览…")
+        browse_btn.setFixedWidth(72)
+        browse_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        value_row_layout.addWidget(browse_btn)
+
+        value_hint_label = CaptionLabel("")
+        value_hint_label.setWordWrap(True)
+        value_hint_label.setStyleSheet("color: #666;")
+
+        value_wrapper = QWidget()
+        value_wrapper_layout = QVBoxLayout(value_wrapper)
+        value_wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        value_wrapper_layout.setSpacing(4)
+        value_wrapper_layout.addWidget(value_row)
+        value_wrapper_layout.addWidget(value_hint_label)
+        value_wrapper.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        value_label = self._make_label("值")
+        section.form.addRow(value_label, value_wrapper)
+
+        # ---- 参数输入框 ----
+        args_edit = LineEdit()
+        args_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        current_args = getattr(settings, "Args", "")
+        args_edit.setText("" if current_args is None else str(current_args))
+
+        args_hint_widget = FieldWidget(args_edit, "（可选）应用程序启动参数")
+        args_label = self._make_label("参数")
+        section.form.addRow(args_label, args_hint_widget)
+
+        # ---- 根据 RunType 更新 UI状态 ----
+        def _update_ui():
+            rt = combo_current_data(type_combo)
+            rt_val = rt.value if hasattr(rt, "value") else str(rt)
+
+            if rt_val == "Application":
+                value_edit.setPlaceholderText("应用程序路径")
+                value_hint_label.setText(
+                    "填写可执行文件路径，或点击浏览…选择。"
+                )
+                browse_btn.setVisible(True)
+                args_label.setVisible(True)
+                args_hint_widget.setVisible(True)
+            elif rt_val == "File":
+                value_edit.setPlaceholderText("文件路径")
+                value_hint_label.setText(
+                    "填写文件路径，或点击浏览…选择。系统会用默认程序打开。"
+                )
+                browse_btn.setVisible(True)
+                args_label.setVisible(False)
+                args_hint_widget.setVisible(False)
+            elif rt_val == "Folder":
+                value_edit.setPlaceholderText("文件夹路径")
+                value_hint_label.setText(
+                    "填写文件夹路径，或点击浏览…选择。系统会用文件管理器打开。"
+                )
+                browse_btn.setVisible(True)
+                args_label.setVisible(False)
+                args_hint_widget.setVisible(False)
+            elif rt_val == "Url":
+                value_edit.setPlaceholderText("https://example.com")
+                value_hint_label.setText(
+                    "填写网页地址。如果不包含协议前缀，会自动添加 https://。"
+                )
+                browse_btn.setVisible(False)
+                args_label.setVisible(False)
+                args_hint_widget.setVisible(False)
+            elif rt_val == "Command":
+                if sys.platform == "win32":
+                    value_edit.setPlaceholderText("cmd命令")
+                else:
+                    value_edit.setPlaceholderText("终端命令")
+                value_hint_label.setText(
+                    "填写要执行的完整命令。Windows 使用 cmd.exe，Linux/macOS 使用 bash。"
+                )
+                browse_btn.setVisible(False)
+                args_label.setVisible(False)
+                args_hint_widget.setVisible(False)
+            else:
+                value_edit.setPlaceholderText("")
+                value_hint_label.setText("")
+                browse_btn.setVisible(False)
+                args_label.setVisible(False)
+                args_hint_widget.setVisible(False)
+
+        # ---- 浏览按钮点击 ----
+        def _on_browse():
+            rt = combo_current_data(type_combo)
+            rt_val = rt.value if hasattr(rt, "value") else str(rt)
+
+            if rt_val == "Folder":
+                path = QFileDialog.getExistingDirectory(
+                    self, "选择文件夹", value_edit.text()
+                )
+                if path:
+                    value_edit.setText(path)
+
+            elif rt_val == "Application":
+                if sys.platform == "win32":
+                    filter_str = "应用程序 (*.exe *.bat *.cmd *.com *.lnk);;所有文件 (*)"
+                elif sys.platform == "darwin":
+                    filter_str = "应用程序 (*.app);;可执行文件 (*);;所有文件 (*)"
+                else:
+                    filter_str = "所有文件 (*)"
+                path, _ = QFileDialog.getOpenFileName(
+                    self, "选择应用程序", value_edit.text(), filter_str
+                )
+                if path:
+                    value_edit.setText(path)
+
+            else:
+                # File
+                path, _ = QFileDialog.getOpenFileName(
+                    self, "选择文件", value_edit.text(), "所有文件 (*)"
+                )
+                if path:
+                    value_edit.setText(path)
+
+        browse_btn.clicked.connect(_on_browse)
+
+        # ---- 信号连接 ----
+        def _on_type_changed(_):
+            settings.RunType = combo_current_data(type_combo)
+            _update_ui()
+            self.changed.emit()
+
+        def _on_value_changed(text: str):
+            settings.Value = text
+            self.changed.emit()
+
+        def _on_args_changed(text: str):
+            settings.Args = text
+            self.changed.emit()
+
+        type_combo.currentIndexChanged.connect(_on_type_changed)
+        value_edit.textChanged.connect(_on_value_changed)
+        args_edit.textChanged.connect(_on_args_changed)
+
+        # ---- 初始化 UI状态 ----
+        _update_ui()
 
     # =========================================================
     # Widgets
@@ -581,7 +716,7 @@ class AutomationPropertyEditor(QWidget):
         spin.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         spin.setRange(minimum, maximum)
         spin.setSingleStep(step)
-        spin.setDecimals(2 if step < 1 else 0)
+        spin.setDecimals(2if step< 1 else 0)
 
         try:
             spin.setValue(float(getattr(obj, attr, 0)))

@@ -1,16 +1,26 @@
+# automation/platform_open.py
+"""
+跨平台打开操作 —— 对齐 ClassIsland RunAction 的行为。
+
+ClassIsland 的核心策略非常简洁：
+  - Application / File / Folder: Process.Start + UseShellExecute = true
+  - Url:  Windows用 ShellExecute，Linux 用 xdg-open，macOS 用 open
+  - Command: cmd.exe /c 或 /bin/bash -c
+
+本模块用Python 等效方式复现上述行为。
+"""
 from __future__ import annotations
 
 import os
 import shlex
 import subprocess
 import sys
-import webbrowser
-from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
-from PyQt5.QtCore import QUrl
-from PyQt5.QtGui import QDesktopServices
 
+#============================================================
+# 内部工具
+# ============================================================
 
 def _debug(logger, message: str) -> None:
     if logger is not None:
@@ -21,191 +31,126 @@ def _debug(logger, message: str) -> None:
 
 
 def _normalize_url(url: str) -> str:
+    """与 ClassIsland 完全一致的 URL 规范化逻辑。"""
     url = (url or "").strip()
     if not url:
         return url
-
     if ":" not in url and not url.startswith("\\"):
         return "https://" + url
     return url
 
 
-def _try_qt_open_url(url: str, logger=None) -> bool:
-    try:
-        ok = QDesktopServices.openUrl(QUrl(url))
-        _debug(logger, f"[platform_open] QDesktopServices.openUrl({url!r}) -> {ok}")
-        return bool(ok)
-    except Exception as e:
-        _debug(logger, f"[platform_open] QDesktopServices.openUrl({url!r}) failed: {e}")
-        return False
+def _shell_execute_win(file: str, args: str | None = None, logger=None) -> None:
+    """
+    Windows:调用 ShellExecuteW，等效于 .NET 的
+    Process.Start(new ProcessStartInfo { FileName=..., Arguments=..., UseShellExecute=true })
+
+    可以打开：- 普通 exe /带空格路径的 exe
+      - .lnk 快捷方式
+      - UWP / MSIX 应用
+      - URL 协议 (https://, ms-settings:等)
+      - 任意已注册文件类型
+    """
+    import ctypes
+    _debug(logger, f"[platform_open] ShellExecuteW file={file!r} args={args!r}")
+    ret = ctypes.windll.shell32.ShellExecuteW(None, "open", file, args, None, 1)
+    # ShellExecuteW 返回值> 32 表示成功
+    if ret <= 32:
+        raise RuntimeError(f"ShellExecuteW 失败 (返回值={ret})，file={file!r} args={args!r}")
 
 
-def _try_qt_open_local(path: str, logger=None) -> bool:
-    try:
-        qurl = QUrl.fromLocalFile(str(Path(path).resolve()))
-        ok = QDesktopServices.openUrl(qurl)
-        _debug(logger, f"[platform_open] QDesktopServices.openUrl(local={path!r}) -> {ok}")
-        return bool(ok)
-    except Exception as e:
-        _debug(logger, f"[platform_open] QDesktopServices.openUrl(local={path!r}) failed: {e}")
-        return False
-
-
-def _try_run_command(args: Sequence[str], logger=None, timeout: float = 8.0) -> bool:
-    try:
-        _debug(logger, f"[platform_open] trying command: {args!r}")
-        result = subprocess.run(
-            list(args),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
-        )
-        if result.returncode == 0:
-            _debug(logger, f"[platform_open] command ok: {args!r}")
-            return True
-
-        _debug(
-            logger,
-            f"[platform_open] command failed rc={result.returncode}: {args!r}, "
-            f"stdout={result.stdout!r}, stderr={result.stderr!r}",
-        )
-        return False
-    except FileNotFoundError:
-        _debug(logger, f"[platform_open] command not found: {args!r}")
-        return False
-    except Exception as e:
-        _debug(logger, f"[platform_open] command exception: {args!r}, err={e}")
-        return False
-
-
-def _linux_open_candidates(target: str) -> list[list[str]]:
-    return [
-        ["gio", "open", target],
-        ["kioclient5", "exec", target],
-        ["kioclient", "exec", target],
-        ["gvfs-open", target],
-        ["xdg-open", target],
-    ]
-
-
-def _mac_open_candidates(target: str) -> list[list[str]]:
-    return [
-        ["open", target],
-    ]
-
-
-def _windows_open_file(path: str) -> bool:
-    os.startfile(path)  # type: ignore[attr-defined]
-    return True
-
-
-def open_url(url: str, logger=None) -> None:
-    url = _normalize_url(url)
-    if not url:
-        raise RuntimeError("URL 为空，无法打开。")
-
-    # 1) Qt
-    if _try_qt_open_url(url, logger=logger):
-        return
-
-    # 2) 平台命令
-    if os.name == "nt":
-        try:
-            _windows_open_file(url)
-            return
-        except Exception as e:
-            _debug(logger, f"[platform_open] os.startfile(url) failed: {e}")
-    elif sys.platform == "darwin":
-        for cmd in _mac_open_candidates(url):
-            if _try_run_command(cmd, logger=logger):
-                return
-    else:
-        for cmd in _linux_open_candidates(url):
-            if _try_run_command(cmd, logger=logger):
-                return
-
-    # 3) Python webbrowser fallback
-    try:
-        ok = webbrowser.open(url)
-        _debug(logger, f"[platform_open] webbrowser.open({url!r}) -> {ok}")
-        if ok:
-            return
-    except Exception as e:
-        _debug(logger, f"[platform_open] webbrowser.open({url!r}) failed: {e}")
-
-    raise RuntimeError(f"无法打开 URL：{url}")
-
-
-def open_file(path: str, logger=None) -> None:
-    path = str(path or "").strip()
-    if not path:
-        raise RuntimeError("文件路径为空，无法打开。")
-
-    # 1) Qt
-    if _try_qt_open_local(path, logger=logger):
-        return
-
-    # 2) 平台命令
-    if os.name == "nt":
-        try:
-            _windows_open_file(path)
-            return
-        except Exception as e:
-            _debug(logger, f"[platform_open] os.startfile(file) failed: {e}")
-    elif sys.platform == "darwin":
-        for cmd in _mac_open_candidates(path):
-            if _try_run_command(cmd, logger=logger):
-                return
-    else:
-        for cmd in _linux_open_candidates(path):
-            if _try_run_command(cmd, logger=logger):
-                return
-
-    raise RuntimeError(f"无法打开文件：{path}")
-
-
-def open_folder(path: str, logger=None) -> None:
-    path = str(path or "").strip()
-    if not path:
-        raise RuntimeError("文件夹路径为空，无法打开。")
-
-    # 1) Qt
-    if _try_qt_open_local(path, logger=logger):
-        return
-
-    # 2) 平台命令
-    if os.name == "nt":
-        try:
-            _windows_open_file(path)
-            return
-        except Exception as e:
-            _debug(logger, f"[platform_open] os.startfile(folder) failed: {e}")
-    elif sys.platform == "darwin":
-        for cmd in _mac_open_candidates(path):
-            if _try_run_command(cmd, logger=logger):
-                return
-    else:
-        for cmd in _linux_open_candidates(path):
-            if _try_run_command(cmd, logger=logger):
-                return
-
-    raise RuntimeError(f"无法打开文件夹：{path}")
-
+# ============================================================
+# 公共 API
+# ============================================================
 
 def open_application(path: str, args: str = "", logger=None) -> None:
+    """
+    运行应用程序。对齐 ClassIsland:
+      Process.Start(new ProcessStartInfo {FileName = path,
+          Arguments = args,
+          UseShellExecute = true
+      });
+    """
     path = str(path or "").strip()
     if not path:
         raise RuntimeError("应用程序路径为空，无法运行。")
 
-    argv = [path]
-    if args.strip():
-        if os.name == "nt":
-            argv.extend([x for x in args.split(" ") if x])
-        else:
-            argv.extend(shlex.split(args))
+    args = str(args or "").strip()
 
-    _debug(logger, f"[platform_open] launching application argv={argv!r}")
-    subprocess.Popen(argv)
+    _debug(logger, f"[platform_open] open_application path={path!r} args={args!r}")
+
+    if sys.platform == "win32":
+        # UseShellExecute = true 等效
+        _shell_execute_win(path, args if args else None, logger=logger)
+    else:
+        # Linux / macOS: 直接 exec，参数需要自己拆分
+        argv = [path]
+        if args:
+            argv.extend(shlex.split(args))
+        _debug(logger, f"[platform_open] Popen argv={argv!r}")
+        subprocess.Popen(argv)
+
+
+def open_file(path: str, logger=None) -> None:
+    """
+    打开文件。对齐 ClassIsland:
+      Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+    """
+    path = str(path or "").strip()
+    if not path:
+        raise RuntimeError("文件路径为空，无法打开。")
+
+    _debug(logger, f"[platform_open] open_file path={path!r}")
+    _shell_open(path, logger=logger)
+
+
+def open_folder(path: str, logger=None) -> None:
+    """
+    打开文件夹。对齐 ClassIsland (与 open_file 完全相同):
+      Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+    """
+    path = str(path or "").strip()
+    if not path:
+        raise RuntimeError("文件夹路径为空，无法打开。")
+
+    _debug(logger, f"[platform_open] open_folder path={path!r}")
+    _shell_open(path, logger=logger)
+
+
+def open_url(url: str, logger=None) -> None:
+    """
+    打开 URL。对齐 ClassIsland:
+      Windows: Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+      Linux:Process.Start(new ProcessStartInfo("xdg-open", path) { UseShellExecute = false });
+      macOS:   Process.Start(new ProcessStartInfo("open", path) { UseShellExecute = false });
+    """
+    url = _normalize_url(url)
+    if not url:
+        raise RuntimeError("URL 为空，无法打开。")
+
+    _debug(logger, f"[platform_open] open_url url={url!r}")
+
+    if sys.platform == "win32":
+        _shell_execute_win(url, logger=logger)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", url])
+    else:
+        # Linux —— 与 ClassIsland 完全一致：直接 xdg-open
+        subprocess.Popen(["xdg-open", url])
+
+
+# ============================================================
+# 内部：统一的 shell-open（File / Folder 共用）
+# ============================================================
+
+def _shell_open(path: str, logger=None) -> None:
+    """
+    等效于 .NET Process.Start + UseShellExecute = true。
+    """
+    if sys.platform == "win32":
+        _shell_execute_win(path, logger=logger)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        # Linux —— 与 ClassIsland 一致
+        subprocess.Popen(["xdg-open", path])
