@@ -14,6 +14,12 @@ from shutil import copy
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import psutil
+from automation.platform_open import (
+    open_application as automation_open_application,
+    open_file as automation_open_file,
+    open_folder as automation_open_folder,
+    open_url as automation_open_url,
+)
 from loguru import logger
 from packaging.version import Version
 from PyQt5 import uic
@@ -4407,23 +4413,23 @@ def build_automation_runtime() -> AutomationRuntime:
     runtime.context.app_quit = lambda: ui_bridge.app_quit_requested.emit()
     runtime.context.app_restart = lambda quiet=False: ui_bridge.app_restart_requested.emit(bool(quiet))
 
-    # run action hooks
-    runtime.context.open_application = lambda path, args: subprocess.Popen(
-        [path] + ([a for a in args.split(' ') if a] if args else [])
-    )
-    runtime.context.open_file = (
-        lambda path: os.startfile(path)
-        if os.name == 'nt'
-        else subprocess.Popen(['xdg-open', path])
-    )
-    runtime.context.open_folder = (
-        lambda path: os.startfile(path)
-        if os.name == 'nt'
-        else subprocess.Popen(['xdg-open', path])
-    )
+    # run action hooks：统一走跨平台兼容层
+    def _open_application(path: str, args: str) -> None:
+        automation_open_application(path, args, logger=logger)
 
-    # URL：切回主线程
-    runtime.context.open_url = lambda url: ui_bridge.open_url_requested.emit(url)
+    def _open_file(path: str) -> None:
+        automation_open_file(path, logger=logger)
+
+    def _open_folder(path: str) -> None:
+        automation_open_folder(path, logger=logger)
+
+    def _open_url(url: str) -> None:
+        automation_open_url(url, logger=logger)
+
+    runtime.context.open_application = _open_application
+    runtime.context.open_file = _open_file
+    runtime.context.open_folder = _open_folder
+    runtime.context.open_url = _open_url
 
     # 天气 action hooks：切回主线程
     runtime.context.show_weather_forecast = lambda: ui_bridge.weather_forecast_requested.emit()
@@ -4445,6 +4451,7 @@ def build_automation_runtime() -> AutomationRuntime:
     runtime.on_runtime_reloaded = _on_runtime_reloaded
 
     return runtime
+
 
 
 
