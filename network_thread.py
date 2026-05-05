@@ -565,32 +565,85 @@ def check_update() -> None:
 
 
 def check_version(version: Dict[str, Any]) -> bool:  # 检查更新
+    from packaging.version import InvalidVersion
+
+    def _normalize_version_text(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        return text.replace("-nightly", "")
+
     global threads
+
     for thread in threads:
-        thread.terminate()
+        try:
+            if thread.isRunning():
+                thread.terminate()
+        except Exception:
+            pass
     threads = []
+
+    if not isinstance(version, dict):
+        logger.warning(f"检查更新返回值不是字典，跳过更新检查: {version!r}")
+        return False
+
     if 'error' in version:
         utils.tray_icon.push_error_notification(
             "检查更新失败！", f"检查更新失败！\n{version['error']}"
         )
         return False
 
-    channel = int(
-        '1'
-        if (channel := config_center.read_conf("Version", "version_channel")) not in ['0', '1']
-        else channel
-    )
-    server_version = version['version_release' if channel == 0 else 'version_beta']
-    local_version = config_center.read_conf("Version", "version")
-    if local_version != "__BUILD_VERSION__":
-        logger.debug(f"服务端版本: {server_version}，本地版本: {local_version}")
-        if Version(server_version.replace('-nightly', '')) > Version(
-            local_version.replace('-nightly', '')
-        ):
+    channel = config_center.read_conf("Version", "version_channel")
+    channel = 0 if channel == '0' else 1
+    channel_key = 'version_release' if channel == 0 else 'version_beta'
+
+    server_version_raw = version.get(channel_key, "")
+    local_version_raw = config_center.read_conf("Version", "version")
+
+    server_version = str(server_version_raw or "").strip()
+    local_version = str(local_version_raw or "").strip()
+
+    if not local_version:
+        logger.warning("本地版本号为空，跳过更新检查")
+        return False
+
+    if local_version in {"__BUILD_VERSION__", "DEBUG"}:
+        logger.debug(f"当前版本为占位/调试版本，跳过更新检查: {local_version}")
+        return False
+
+    if not server_version:
+        logger.warning(
+            f"服务端版本号为空，跳过更新检查: key={channel_key}, data={version!r}"
+        )
+        return False
+
+    logger.debug(f"服务端版本: {server_version}，本地版本: {local_version}")
+
+    server_version_normalized = _normalize_version_text(server_version)
+    local_version_normalized = _normalize_version_text(local_version)
+
+    if not server_version_normalized or not local_version_normalized:
+        logger.warning(
+            "版本号为空，跳过更新检查: "
+            f"server={server_version!r}, local={local_version!r}"
+        )
+        return False
+
+    try:
+        if Version(server_version_normalized) > Version(local_version_normalized):
             utils.tray_icon.push_update_notification(
                 f"新版本速递：{server_version}\n请在“设置”中了解更多。"
             )
-    return None
+            return True
+    except InvalidVersion as e:
+        logger.warning(
+            "版本号格式无效，跳过更新检查: "
+            f"server={server_version!r}, local={local_version!r}, error={e}"
+        )
+        return False
+
+    return False
+
 
 
 class scheduleThread(QThread):  # 获取课表

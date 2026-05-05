@@ -1305,6 +1305,62 @@ class SettingsMenu(FluentWindow):
                 }"""
         )
 
+    def showEvent(self, event):
+        """
+        首次显示时再次按可用工作区修正一次窗口位置与大小。
+        Linux 下一些桌面环境第一次 show 时 geometry 还没稳定，这里补一刀最稳。
+        """
+        result = super().showEvent(event)
+        try:
+            QTimer.singleShot(0, self._apply_safe_window_geometry)
+            QTimer.singleShot(50, self._apply_safe_window_geometry)
+        except Exception as e:
+            logger.error(f"显示设置窗口时修正几何失败: {e}")
+        return result
+
+    def _get_available_screen_geometry(self):
+        """
+        获取当前窗口所在屏幕的可用工作区，而不是整块屏幕。
+        这能避免 Linux / KDE / GNOME / UKUI 等环境下被底部面板遮挡。
+        """
+        try:
+            screen = self.windowHandle().screen() if self.windowHandle() else None
+        except Exception:
+            screen = None
+
+        if screen is None:
+            screen = QApplication.primaryScreen()
+
+        # 优先用 availableGeometry，避开任务栏 / dock / 顶栏
+        return screen.availableGeometry()
+
+    def _apply_safe_window_geometry(self):
+        """
+        按当前屏幕可用区域安全设置窗口大小与位置。
+        这一步只管设置窗口本身的外框，不动自动化页面内部布局。
+        """
+        geo = self._get_available_screen_geometry()
+
+        # 给窗口四周留一点呼吸空间，防止紧贴边缘
+        margin = 20
+
+        avail_w = max(600, geo.width() - margin * 2)
+        avail_h = max(500, geo.height() - margin * 2)
+
+        # 目标尺寸：尽量保留你现在“大设置页”的视觉，但不超过可用区域
+        target_w = min(avail_w, max(1100, int(avail_w * 0.90)))
+        target_h = min(avail_h, max(760, int(avail_h * 0.90)))
+
+        # 额外保险：再兜一次，绝不允许超出可用区域
+        target_w = min(target_w, avail_w)
+        target_h = min(target_h, avail_h)
+
+        x = geo.x() + (geo.width() - target_w) // 2
+        y = geo.y() + (geo.height() - target_h) // 2
+
+        self.resize(target_w, target_h)
+        self.move(x, y)
+
     def load_all_item(self):
         self.setup_timeline_edit()
         self.setup_schedule_edit()
@@ -6256,23 +6312,15 @@ class SettingsMenu(FluentWindow):
         self.load_all_item()
         self.check_and_disable_schedule_edit()
         self.check_and_disable_timeline_edit()
-        self.setMinimumWidth(700)
+        self.setMinimumWidth(1320)
         self.setMinimumHeight(400)
         self.navigationInterface.setExpandWidth(250)
         self.navigationInterface.setIndicatorAnimationEnabled(True)
         self.navigationInterface.setCollapsible(False)
         self.setMicaEffectEnabled(True)
 
-        # 修复设置窗口在各个屏幕分辨率DPI下的窗口大小
-        screen_geometry = QApplication.primaryScreen().geometry()
-        screen_width = screen_geometry.width()
-        screen_height = screen_geometry.height()
-
-        width = int(screen_width * 0.6)
-        height = int(screen_height * 0.7)
-
-        self.move(int(screen_width / 2 - width / 2), 150)
-        self.resize(width, height)
+        # 使用可用工作区计算窗口位置与大小，避免 Linux / KDE / GNOME / UKUI 下被底栏遮挡
+        self._apply_safe_window_geometry()
 
         self.setWindowTitle(self.tr('Class Widgets - 设置'))
         self.setWindowIcon(QIcon(str(CW_HOME / 'img' / 'logo' / 'favicon-settings.ico')))
