@@ -37,49 +37,49 @@ class AutomationUiController:
         self.runtime = runtime
         self.conf = conf_module
 
-        # 参考 ClassIsland：触发器按“生命周期 / 课程 / 通用”组织
+        # 触发器分组：更贴近 CW / 中文语义
         self._trigger_groups: dict[str, list[tuple[str, str]]] = {
-            "生命周期": [
+            "应用生命周期": [
                 ("classisland.lifetime.startup", "应用启动时"),
                 ("classisland.lifetime.stopping", "应用退出时"),
             ],
-            "课程": [
+            "课程状态": [
                 ("classisland.lessons.currentTimeStateChanged", "当前时间状态变化时"),
                 ("classisland.lessons.onClass", "上课时"),
                 ("classisland.lessons.onBreakingTime", "课间休息时"),
                 ("classisland.lessons.onAfterSchool", "放学时"),
                 ("classisland.lessons.preTimePoint", "特定时间点前"),
             ],
-            "通用": [
-                ("classisland.cron", "cron"),
+            "通用触发": [
+                ("classisland.cron", "定时触发（Cron）"),
                 ("classisland.signal", "收到信号时"),
-                ("classisland.uri", "调用 Uri 时"),
-                ("classisland.trayMenu", "从托盘菜单运行时"),
-                ("classisland.ruleSet.rulesetChanged", "规则集更新时"),
+                ("classisland.uri", "调用 URI 时"),
+                ("classisland.trayMenu", "点击托盘菜单时"),
+                ("classisland.ruleSet.rulesetChanged", "规则集状态更新时"),
             ],
         }
 
-        # 参考 ClassIsland ActionMenuTree 的思路：动作按组展示
+        # 动作分组：去掉 ClassIsland 遗留命名
         self._action_groups: dict[str, list[tuple[str, str]]] = {
-            "提醒": [
+            "提醒通知": [
                 ("classisland.showNotification", "显示提醒"),
                 ("classisland.notification.weather", "显示天气提醒"),
             ],
-            "运行": [
+            "运行 / 打开": [
                 ("classisland.os.run", "运行"),
             ],
-            "应用设置": [
+            "自动化设置": [
                 ("classisland.settings", "应用设置"),
             ],
-            "自动化": [
+            "自动化联动": [
                 ("classisland.broadcastSignal", "广播信号"),
             ],
-            "控制": [
+            "流程控制": [
                 ("classisland.action.sleep", "等待时长"),
             ],
-            "ClassIsland": [
-                ("classisland.app.quit", "退出 ClassIsland"),
-                ("classisland.app.restart", "重启 ClassIsland"),
+            "应用控制": [
+                ("classisland.app.quit", "退出应用"),
+                ("classisland.app.restart", "重启应用"),
             ],
         }
 
@@ -305,8 +305,8 @@ class AutomationUiController:
             "classisland.action.sleep": "等待时长",
             "classisland.settings": "应用设置",
             "classisland.broadcastSignal": "广播信号",
-            "classisland.app.quit": "退出 ClassIsland",
-            "classisland.app.restart": "重启 ClassIsland",
+            "classisland.app.quit": "退出应用",
+            "classisland.app.restart": "重启应用",
         }
         return fallback.get(action_id, action_id)
 
@@ -388,23 +388,45 @@ class AutomationUiController:
     # Display helpers
     # =========================================================
 
+    @staticmethod
+    def _truncate(text: str, max_len: int = 24) -> str:
+        text = str(text or "").strip()
+        if len(text) <= max_len:
+            return text
+        return text[:max_len] + "…"
+
+    @staticmethod
+    def _time_state_display_name(state: Any) -> str:
+        name = getattr(state, "name", str(state))
+        mapping = {
+            "None_": "无",
+            "OnClass": "上课",
+            "PrepareOnClass": "准备上课",
+            "Breaking": "课间",
+            "AfterSchool": "放学",
+        }
+        return mapping.get(name, name)
+
     def workflow_display_text(self, workflow: Workflow) -> str:
-        name = workflow.ActionSet.Name
+        name = workflow.ActionSet.Name or "未命名工作流"
         enabled = "启用" if workflow.ActionSet.IsEnabled else "禁用"
-        revert = "可恢复" if workflow.ActionSet.IsRevertEnabled else "不恢复"
-        return f"{name} [{enabled}/{revert}]"
+        revert = "启用恢复" if workflow.ActionSet.IsRevertEnabled else "不恢复"
+        cond = "启用条件" if workflow.IsConditionEnabled else "无条件"
+        trigger_count = len(workflow.Triggers)
+        action_count = len(workflow.ActionSet.Actions)
+        return f"{name} [{enabled} / {revert} / {cond}] · {trigger_count} 触发器 · {action_count} 动作"
 
     def trigger_display_text(self, trigger: TriggerSettings) -> str:
         info = get_trigger_info(trigger.Id)
         name = info.Name if info else self._trigger_name_fallback(trigger.Id)
         summary = self.trigger_summary(trigger)
-        return f"{name}  {summary}".strip()
+        return f"{name}{summary}"
 
     def action_display_text(self, action: ActionItem) -> str:
         info = get_action_info(action.Id)
         name = info.Name if info else self._action_name_fallback(action.Id)
         summary = self.action_summary(action)
-        return f"{name}  {summary}".strip()
+        return f"{name}{summary}"
 
     def trigger_summary(self, trigger: TriggerSettings) -> str:
         s = trigger.Settings
@@ -414,15 +436,25 @@ class AutomationUiController:
         trigger_id = trigger.Id
 
         if trigger_id == "classisland.signal":
-            return f"({getattr(s, 'SignalName', '')})"
+            name = self._truncate(getattr(s, "SignalName", ""))
+            return f"（{name}）" if name else ""
+
         if trigger_id == "classisland.trayMenu":
-            return f"({getattr(s, 'Header', '')})"
+            header = self._truncate(getattr(s, "Header", ""))
+            return f"（{header}）" if header else ""
+
         if trigger_id == "classisland.uri":
-            return f"({getattr(s, 'UriSuffix', '')})"
+            suffix = self._truncate(getattr(s, "UriSuffix", ""))
+            return f"（{suffix}）" if suffix else ""
+
         if trigger_id == "classisland.cron":
-            return f"({getattr(s, 'CronExpression', '')})"
+            expr = self._truncate(getattr(s, "CronExpression", ""), 32)
+            return f"（{expr}）" if expr else ""
+
         if trigger_id == "classisland.lessons.preTimePoint":
-            return f"({getattr(getattr(s, 'TargetState', None), 'name', '')} 前 {getattr(s, 'TimeSeconds', '')}s)"
+            state_name = self._time_state_display_name(getattr(s, "TargetState", None))
+            seconds = getattr(s, "TimeSeconds", "")
+            return f"（{state_name}前 {seconds} 秒）"
 
         return ""
 
@@ -434,7 +466,9 @@ class AutomationUiController:
         action_id = action.Id
 
         if action_id == "classisland.showNotification":
-            return f"({getattr(s, 'Mask', '') or getattr(s, 'Content', '')})"
+            main_text = getattr(s, "Mask", "") or getattr(s, "Content", "")
+            main_text = self._truncate(main_text)
+            return f"（{main_text}）" if main_text else ""
 
         if action_id == "classisland.notification.weather":
             kind = int(getattr(s, "NotificationKind", 0))
@@ -443,26 +477,62 @@ class AutomationUiController:
                 1: "天气预警",
                 2: "逐小时天气",
             }
-            return f"({kind_map.get(kind, kind)})"
+            return f"（{kind_map.get(kind, kind)}）"
 
         if action_id == "classisland.os.run":
             run_type = getattr(s, "RunType", None)
             run_type_name = getattr(run_type, "name", str(run_type)) if run_type is not None else ""
-            target = getattr(s, "Value", "")
+            run_type_map = {
+                "Application": "应用程序",
+                "Command": "命令",
+                "File": "文件",
+                "Folder": "文件夹",
+                "Url": "URL",
+            }
+            type_text = run_type_map.get(run_type_name, run_type_name)
+
+            target = self._truncate(getattr(s, "Value", ""), 28)
             if target:
-                return f"({run_type_name}: {target})"
-            return f"({run_type_name})"
+                return f"（{type_text}：{target}）"
+            if type_text:
+                return f"（{type_text}）"
+            return ""
 
         if action_id == "classisland.settings":
-            return f"({getattr(s, 'Name', '')})"
+            name = str(getattr(s, "Name", "") or "").strip()
+            value = getattr(s, "Value", None)
+
+            if name == "CurrentAutomationConfig":
+                text = self._truncate(str(value or "Default"))
+                return f"（切换配置：{text}）"
+
+            if name == "IsAutomationEnabled":
+                return f"（自动化总开关：{'启用' if bool(value) else '禁用'}）"
+
+            if name:
+                value_text = self._truncate(str(value or ""))
+                if value_text:
+                    return f"（{name} = {value_text}）"
+                return f"（{name}）"
+            return ""
 
         if action_id == "classisland.action.sleep":
-            return f"({getattr(s, 'Value', '')}s)"
+            try:
+                seconds = float(getattr(s, "Value", 0))
+                if seconds.is_integer():
+                    seconds_text = str(int(seconds))
+                else:
+                    seconds_text = str(seconds)
+            except Exception:
+                seconds_text = str(getattr(s, "Value", ""))
+            return f"（{seconds_text} 秒）"
 
         if action_id == "classisland.broadcastSignal":
-            return f"({getattr(s, 'SignalName', '')})"
+            signal_name = self._truncate(getattr(s, "SignalName", ""))
+            return f"（{signal_name}）" if signal_name else ""
 
         if action_id == "classisland.app.restart":
-            return f"(quiet={getattr(s, 'Value', False)})"
+            quiet = bool(getattr(s, "Value", False))
+            return "（静默）" if quiet else ""
 
         return ""

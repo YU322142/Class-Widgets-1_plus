@@ -7,9 +7,7 @@ from PyQt5.QtWidgets import (
     QDialog,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QListWidgetItem,
-    QMessageBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -20,11 +18,15 @@ from qfluentwidgets import (
     CaptionLabel,
     CheckBox,
     ComboBox,
+    LineEdit,
     ListWidget,
+    MessageBox,
+    MessageBoxBase,
     PrimaryPushButton,
     PushButton,
     SmoothScrollArea,
     StrongBodyLabel,
+    SubtitleLabel,
     TitleLabel,
 )
 
@@ -49,10 +51,10 @@ TRIGGER_DESCRIPTIONS: dict[str, str] = {
 }
 
 ACTION_DESCRIPTIONS: dict[str, str] = {
-    "classisland.showNotification": "显示提醒通知，可选等待显示完成。",
+    "classisland.showNotification": "显示 CW 风格提醒。注意：主提示与详细内容会同时显示，不是先标题再正文。",
     "classisland.notification.weather": "显示天气提醒，包括三天天气、天气预警、逐小时天气。",
     "classisland.os.run": "运行程序、命令、文件、文件夹或 URL。",
-    "classisland.settings": "修改应用设置；启用恢复时会使用设置叠层。",
+    "classisland.settings": "修改自动化自身设置（如当前配置、自动化开关）。当前不是 ClassIsland 那种完整全应用设置编辑器。",
     "classisland.broadcastSignal": "广播一个应用内信号，可用于联动其他 SignalTrigger。",
     "classisland.action.sleep": "等待指定时长，常用于串行动作之间的延迟。",
     "classisland.app.quit": "退出当前应用。",
@@ -149,6 +151,65 @@ class SectionHeader(QWidget):
         layout.addWidget(self.desc_label)
 
 
+class AutomationTextFieldDialog(MessageBoxBase):
+    def __init__(
+        self,
+        parent=None,
+        title: str = "标题",
+        text: str = "请输入内容",
+        placeholder: str = "",
+        validator=None,
+    ) -> None:
+        super().__init__(parent)
+
+        self._validator = validator
+
+        self.titleLabel = SubtitleLabel(title)
+        self.contentLabel = BodyLabel(text)
+        self.contentLabel.setWordWrap(True)
+        self.textField = LineEdit()
+        self.textField.setPlaceholderText(placeholder)
+        self.textField.setClearButtonEnabled(True)
+        self.tipLabel = CaptionLabel("")
+        self.tipLabel.setWordWrap(True)
+        self.tipLabel.setStyleSheet("color: #666;")
+
+        self.yesButton.setText("确定")
+        self.cancelButton.setText("取消")
+        self.yesButton.setEnabled(False)
+
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.contentLabel)
+        self.viewLayout.addWidget(self.textField)
+        self.viewLayout.addWidget(self.tipLabel)
+        self.widget.setMinimumWidth(380)
+
+        self.textField.textChanged.connect(self._on_text_changed)
+
+    def _on_text_changed(self, text: str) -> None:
+        text = (text or "").strip()
+        if not text:
+            self.tipLabel.setStyleSheet("color: #c42b1c;")
+            self.tipLabel.setText("名称不能为空。")
+            self.yesButton.setEnabled(False)
+            return
+
+        if self._validator is not None:
+            ok, message = self._validator(text)
+            if not ok:
+                self.tipLabel.setStyleSheet("color: #c42b1c;")
+                self.tipLabel.setText(message)
+                self.yesButton.setEnabled(False)
+                return
+
+        self.tipLabel.setStyleSheet("color: #0f7b0f;")
+        self.tipLabel.setText("可以使用这个名称。")
+        self.yesButton.setEnabled(True)
+
+    def text(self) -> str:
+        return self.textField.text().strip()
+
+
 class GroupedPickerDialog(QDialog):
     def __init__(
         self,
@@ -164,8 +225,6 @@ class GroupedPickerDialog(QDialog):
         self._groups = groups
         self._descriptions = item_descriptions or {}
 
-        self.setStyleSheet("QDialog { background: white; }")
-
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 20, 20, 20)
         root.setSpacing(12)
@@ -173,7 +232,7 @@ class GroupedPickerDialog(QDialog):
         title_label = TitleLabel(title)
         root.addWidget(title_label)
 
-        desc = BodyLabel("请先选择左侧分组，再选择右侧条目。")
+        desc = CaptionLabel("请先选择左侧分组，再选择右侧条目。")
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #666;")
         root.addWidget(desc)
@@ -222,6 +281,7 @@ class GroupedPickerDialog(QDialog):
         btn_row.addStretch(1)
         self.ok_btn = PrimaryPushButton("确定")
         self.cancel_btn = PushButton("取消")
+        self.ok_btn.setEnabled(False)
         btn_row.addWidget(self.ok_btn)
         btn_row.addWidget(self.cancel_btn)
         root.addLayout(btn_row)
@@ -241,6 +301,7 @@ class GroupedPickerDialog(QDialog):
     def _on_group_changed(self, row: int) -> None:
         self.item_list.clear()
         self.desc_label.setText("请选择一个条目后，这里会显示它的用途。")
+        self.ok_btn.setEnabled(False)
 
         if row < 0:
             return
@@ -261,16 +322,17 @@ class GroupedPickerDialog(QDialog):
         item = self.item_list.item(row)
         if item is None:
             self.desc_label.setText("请选择一个条目后，这里会显示它的用途。")
+            self.ok_btn.setEnabled(False)
             return
 
         item_id = item.data(Qt.UserRole)
         desc = self._descriptions.get(item_id, f"ID: {item_id}")
         self.desc_label.setText(desc)
+        self.ok_btn.setEnabled(True)
 
     def _on_accept(self) -> None:
         item = self.item_list.currentItem()
         if item is None:
-            QMessageBox.warning(self, "选择", "请先选择一个条目。")
             return
 
         self.selected_id = item.data(Qt.UserRole)
@@ -311,7 +373,7 @@ class AutomationSettingsPage(QWidget):
         self.title_label = TitleLabel("自动化")
         root.addWidget(self.title_label)
 
-        self.subtitle_label = BodyLabel("通过“触发器 + 条件 + 动作”的方式，让应用在不同场景下自动执行任务。")
+        self.subtitle_label = CaptionLabel("通过“触发器 + 条件 + 动作”的方式，让应用在不同场景下自动执行任务。")
         self.subtitle_label.setWordWrap(True)
         self.subtitle_label.setStyleSheet("color: #666;")
         root.addWidget(self.subtitle_label)
@@ -422,7 +484,10 @@ class AutomationSettingsPage(QWidget):
         property_layout.setContentsMargins(16, 16, 16, 16)
         property_layout.setSpacing(10)
         property_layout.addWidget(
-            SectionHeader("参数设置", "点击右侧的工作流、触发器、动作后，这里会显示对应的详细参数。")
+            SectionHeader(
+                "参数设置",
+                "点击右侧的工作流、触发器、规则集、规则组、规则、动作后，这里会显示对应的详细参数。"
+            )
         )
         self.property_editor = AutomationPropertyEditor()
         property_layout.addWidget(self.property_editor)
@@ -590,11 +655,37 @@ class AutomationSettingsPage(QWidget):
 
     def _apply_initial_sizes(self) -> None:
         total = max(self.width(), 1280)
-        # 用比例而不是死值，改善高 DPI / 大缩放屏幕下两边显示不全
         left = int(total * 0.40)
         left = max(380, min(left, 560))
         right = max(520, total - left - 24)
         self.main_splitter.setSizes([left, right])
+
+    # =========================================================
+    # Dialog helpers
+    # =========================================================
+
+    def _show_info_dialog(self, title: str, content: str) -> None:
+        w = MessageBox(title, content, self)
+        w.yesButton.setText("好")
+        w.cancelButton.hide()
+        w.buttonLayout.insertStretch(0, 1)
+        w.setFixedWidth(560)
+        w.exec()
+
+    def _show_error_dialog(self, title: str, content: str) -> None:
+        w = MessageBox(title, content, self)
+        w.yesButton.setText("好")
+        w.cancelButton.hide()
+        w.buttonLayout.insertStretch(0, 1)
+        w.setFixedWidth(560)
+        w.exec()
+
+    def _ask_confirm(self, title: str, content: str, yes_text: str = "确定", cancel_text: str = "取消") -> bool:
+        w = MessageBox(title, content, self)
+        w.yesButton.setText(yes_text)
+        w.cancelButton.setText(cancel_text)
+        w.setFixedWidth(560)
+        return bool(w.exec())
 
     # =========================================================
     # Status helpers
@@ -693,6 +784,7 @@ class AutomationSettingsPage(QWidget):
 
         self.property_editor.changed.connect(self._on_property_changed)
         self.rules_editor.changed.connect(self._on_ruleset_changed)
+        self.rules_editor.targetChanged.connect(self._on_ruleset_target_changed)
         self.config_combo.currentIndexChanged.connect(self._on_config_changed)
 
     # =========================================================
@@ -745,8 +837,8 @@ class AutomationSettingsPage(QWidget):
             self._current_workflow_index = -1
             self.trigger_list.clear()
             self.action_list.clear()
-            self.property_editor.set_target(None, None)
             self.rules_editor.set_workflow(None)
+            self.property_editor.set_target(None, None)
 
     def _reload_middle(self) -> None:
         self.trigger_list.clear()
@@ -754,8 +846,8 @@ class AutomationSettingsPage(QWidget):
 
         workflow = self._get_current_workflow()
         if workflow is None:
-            self.property_editor.set_target(None, None)
             self.rules_editor.set_workflow(None)
+            self.property_editor.set_target(None, None)
             self._update_config_info()
             return
 
@@ -764,6 +856,8 @@ class AutomationSettingsPage(QWidget):
 
         for action in workflow.ActionSet.Actions:
             self.action_list.addItem(QListWidgetItem(self.controller.action_display_text(action)))
+
+        self.rules_editor.set_workflow(workflow)
 
         if self._current_trigger_index >= 0:
             trigger = self._get_current_trigger()
@@ -774,7 +868,6 @@ class AutomationSettingsPage(QWidget):
         else:
             self.property_editor.set_target("workflow", workflow)
 
-        self.rules_editor.set_workflow(workflow)
         self._update_config_info()
 
     def _refresh_summary_texts_only(self) -> None:
@@ -785,6 +878,7 @@ class AutomationSettingsPage(QWidget):
 
         workflow = self._get_current_workflow()
         if workflow is None:
+            self.rules_editor.refresh_display_texts()
             self._update_config_info()
             return
 
@@ -798,6 +892,7 @@ class AutomationSettingsPage(QWidget):
             if item is not None:
                 item.setText(self.controller.action_display_text(action))
 
+        self.rules_editor.refresh_display_texts()
         self._update_config_info()
 
     # =========================================================
@@ -825,6 +920,20 @@ class AutomationSettingsPage(QWidget):
             return workflow.ActionSet.Actions[self._current_action_index]
         return None
 
+    def _clear_trigger_action_selection(self) -> None:
+        self._current_trigger_index = -1
+        self._current_action_index = -1
+
+        self.trigger_list.blockSignals(True)
+        self.trigger_list.clearSelection()
+        self.trigger_list.setCurrentRow(-1)
+        self.trigger_list.blockSignals(False)
+
+        self.action_list.blockSignals(True)
+        self.action_list.clearSelection()
+        self.action_list.setCurrentRow(-1)
+        self.action_list.blockSignals(False)
+
     # =========================================================
     # Picker dialogs
     # =========================================================
@@ -849,14 +958,25 @@ class AutomationSettingsPage(QWidget):
 
     def _on_new_config(self) -> None:
         try:
-            name, ok = QInputDialog.getText(self, "新建配置", "请输入新配置名称：")
-            if not ok:
-                return
-            name = (name or "").strip()
-            if not name:
+            def _validator(text: str):
+                invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']
+                if any(ch in text for ch in invalid_chars):
+                    return False, "名称包含非法字符。"
+                if text in self.controller.list_configs():
+                    return False, "这个配置名已经存在。"
+                return True, "可以使用。"
+
+            dlg = AutomationTextFieldDialog(
+                self,
+                title="新建配置",
+                text="请输入新的自动化配置名称。",
+                placeholder="例如：我的配置",
+                validator=_validator,
+            )
+            if not dlg.exec():
                 return
 
-            created = self.controller.create_config(name)
+            created = self.controller.create_config(dlg.text())
             self._reload_all()
             idx = self.config_combo.findText(created)
             if idx >= 0:
@@ -865,19 +985,17 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved(f"已新建配置：{created}。当前正在编辑新配置文件。")
         except Exception as e:
             self._set_status_error(f"新建配置失败：{e}")
-            QMessageBox.critical(self, "自动化", f"新建配置失败：\n{e}")
+            self._show_error_dialog("自动化", f"新建配置失败：\n{e}")
 
     def _on_delete_config(self) -> None:
         try:
             current = self.controller.get_current_config_name()
-            ret = QMessageBox.question(
-                self,
+            if not self._ask_confirm(
                 "删除配置",
                 f"确定要删除配置文件“{current}”吗？\n\n删除后无法恢复。",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if ret != QMessageBox.Yes:
+                yes_text="删除",
+                cancel_text="取消",
+            ):
                 return
 
             next_name = self.controller.delete_config(current)
@@ -889,7 +1007,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved(f"已删除配置：{current}。当前切换到：{next_name}。")
         except Exception as e:
             self._set_status_error(f"删除配置失败：{e}")
-            QMessageBox.critical(self, "自动化", f"删除配置失败：\n{e}")
+            self._show_error_dialog("自动化", f"删除配置失败：\n{e}")
 
     # =========================================================
     # Global / top bar
@@ -904,7 +1022,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved("已修改“启用自动化”状态，并保存到文件。若要影响当前会话，请点击“应用到运行时”。")
         except Exception as e:
             self._set_status_error(f"修改启用状态失败：{e}")
-            QMessageBox.critical(self, "自动化", f"修改启用状态失败：\n{e}")
+            self._show_error_dialog("自动化", f"修改启用状态失败：\n{e}")
 
     def _on_reload(self) -> None:
         try:
@@ -918,17 +1036,17 @@ class AutomationSettingsPage(QWidget):
             )
         except Exception as e:
             self._set_status_error(f"重载配置失败：{e}")
-            QMessageBox.critical(self, "自动化", f"重载配置失败：\n{e}")
+            self._show_error_dialog("自动化", f"重载配置失败：\n{e}")
 
     def _on_save(self) -> None:
         try:
             self.controller.save_current()
             self._set_status_saved()
             self._update_config_info()
-            QMessageBox.information(self, "自动化", "自动化配置已保存到文件。")
+            self._show_info_dialog("自动化", "自动化配置已保存到文件。")
         except Exception as e:
             self._set_status_error(f"保存配置失败：{e}")
-            QMessageBox.critical(self, "自动化", f"保存配置失败：\n{e}")
+            self._show_error_dialog("自动化", f"保存配置失败：\n{e}")
 
     def _on_apply(self) -> None:
         try:
@@ -936,16 +1054,14 @@ class AutomationSettingsPage(QWidget):
             wf_count = len(self.controller.workflows)
 
             if self.controller.has_live_runtime():
-                ret = QMessageBox.question(
-                    self,
+                if not self._ask_confirm(
                     "应用到运行时",
                     f"将使用当前配置文件“{config_name}”中的 {wf_count} 个工作流替换当前运行时。\n\n"
                     f"这不会合并旧工作流，而是整体重载。\n\n"
                     f"是否继续？",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                if ret != QMessageBox.Yes:
+                    yes_text="继续",
+                    cancel_text="取消",
+                ):
                     return
 
             self.controller.save_current()
@@ -956,13 +1072,13 @@ class AutomationSettingsPage(QWidget):
                 self._set_status_applied(
                     f"已应用到当前运行时：{config_name}（{wf_count} 个工作流）。"
                 )
-                QMessageBox.information(self, "自动化", "已应用到当前运行时。")
+                self._show_info_dialog("自动化", "已应用到当前运行时。")
             else:
                 self._set_status_saved("当前没有可应用的运行时，已仅保存到文件。")
-                QMessageBox.information(self, "自动化", "当前没有可应用的运行时，仅保存到了文件。")
+                self._show_info_dialog("自动化", "当前没有可应用的运行时，仅保存到了文件。")
         except Exception as e:
             self._set_status_error(f"应用到运行时失败：{e}")
-            QMessageBox.critical(self, "自动化", f"应用到运行时失败：\n{e}")
+            self._show_error_dialog("自动化", f"应用到运行时失败：\n{e}")
 
     def _on_config_changed(self, index: int) -> None:
         if index < 0:
@@ -989,7 +1105,7 @@ class AutomationSettingsPage(QWidget):
             )
         except Exception as e:
             self._set_status_error(f"切换配置文件失败：{e}")
-            QMessageBox.critical(self, "自动化", f"切换配置文件失败：\n{e}")
+            self._show_error_dialog("自动化", f"切换配置文件失败：\n{e}")
 
     # =========================================================
     # Workflow actions
@@ -1002,10 +1118,11 @@ class AutomationSettingsPage(QWidget):
             self._current_trigger_index = -1
             self._current_action_index = -1
             self._reload_workflows()
+            self.rules_editor.clear_selection_focus()
             self._set_status_saved("已新建工作流，并保存到文件。若要当前会话生效，请点击“应用到运行时”。")
         except Exception as e:
             self._set_status_error(f"新建工作流失败：{e}")
-            QMessageBox.critical(self, "自动化", f"新建工作流失败：\n{e}")
+            self._show_error_dialog("自动化", f"新建工作流失败：\n{e}")
 
     def _on_delete_workflow(self) -> None:
         try:
@@ -1016,28 +1133,31 @@ class AutomationSettingsPage(QWidget):
             self._current_action_index = -1
             self._current_workflow_index = min(self._current_workflow_index, len(self.controller.workflows) - 1)
             self._reload_workflows()
+            self.rules_editor.clear_selection_focus()
             self._set_status_saved("已删除工作流，并保存到文件。若要当前会话生效，请点击“应用到运行时”。")
         except Exception as e:
             self._set_status_error(f"删除工作流失败：{e}")
-            QMessageBox.critical(self, "自动化", f"删除工作流失败：\n{e}")
+            self._show_error_dialog("自动化", f"删除工作流失败：\n{e}")
 
     def _on_workflow_up(self) -> None:
         try:
             self._current_workflow_index = self.controller.move_workflow_up(self._current_workflow_index)
             self._reload_workflows()
+            self.rules_editor.clear_selection_focus()
             self._set_status_saved("已调整工作流顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"上移工作流失败：{e}")
-            QMessageBox.critical(self, "自动化", f"上移工作流失败：\n{e}")
+            self._show_error_dialog("自动化", f"上移工作流失败：\n{e}")
 
     def _on_workflow_down(self) -> None:
         try:
             self._current_workflow_index = self.controller.move_workflow_down(self._current_workflow_index)
             self._reload_workflows()
+            self.rules_editor.clear_selection_focus()
             self._set_status_saved("已调整工作流顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"下移工作流失败：{e}")
-            QMessageBox.critical(self, "自动化", f"下移工作流失败：\n{e}")
+            self._show_error_dialog("自动化", f"下移工作流失败：\n{e}")
 
     # =========================================================
     # Trigger actions
@@ -1058,7 +1178,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved("已添加触发器，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"添加触发器失败：{e}")
-            QMessageBox.critical(self, "自动化", f"添加触发器失败：\n{e}")
+            self._show_error_dialog("自动化", f"添加触发器失败：\n{e}")
 
     def _on_delete_trigger(self) -> None:
         try:
@@ -1071,7 +1191,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved("已删除触发器，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"删除触发器失败：{e}")
-            QMessageBox.critical(self, "自动化", f"删除触发器失败：\n{e}")
+            self._show_error_dialog("自动化", f"删除触发器失败：\n{e}")
 
     def _on_trigger_up(self) -> None:
         try:
@@ -1085,7 +1205,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved("已调整触发器顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"上移触发器失败：{e}")
-            QMessageBox.critical(self, "自动化", f"上移触发器失败：\n{e}")
+            self._show_error_dialog("自动化", f"上移触发器失败：\n{e}")
 
     def _on_trigger_down(self) -> None:
         try:
@@ -1099,7 +1219,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved("已调整触发器顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"下移触发器失败：{e}")
-            QMessageBox.critical(self, "自动化", f"下移触发器失败：\n{e}")
+            self._show_error_dialog("自动化", f"下移触发器失败：\n{e}")
 
     # =========================================================
     # Action actions
@@ -1120,7 +1240,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved("已添加动作，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"添加动作失败：{e}")
-            QMessageBox.critical(self, "自动化", f"添加动作失败：\n{e}")
+            self._show_error_dialog("自动化", f"添加动作失败：\n{e}")
 
     def _on_delete_action(self) -> None:
         try:
@@ -1133,7 +1253,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved("已删除动作，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"删除动作失败：{e}")
-            QMessageBox.critical(self, "自动化", f"删除动作失败：\n{e}")
+            self._show_error_dialog("自动化", f"删除动作失败：\n{e}")
 
     def _on_action_up(self) -> None:
         try:
@@ -1147,7 +1267,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved("已调整动作顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"上移动作失败：{e}")
-            QMessageBox.critical(self, "自动化", f"上移动作失败：\n{e}")
+            self._show_error_dialog("自动化", f"上移动作失败：\n{e}")
 
     def _on_action_down(self) -> None:
         try:
@@ -1161,7 +1281,7 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved("已调整动作顺序，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"下移动作失败：{e}")
-            QMessageBox.critical(self, "自动化", f"下移动作失败：\n{e}")
+            self._show_error_dialog("自动化", f"下移动作失败：\n{e}")
 
     # =========================================================
     # Selection
@@ -1172,13 +1292,22 @@ class AutomationSettingsPage(QWidget):
         self._current_trigger_index = -1
         self._current_action_index = -1
         self._reload_middle()
+        self.rules_editor.clear_selection_focus()
+
+        workflow = self._get_current_workflow()
+        if workflow is not None:
+            self.property_editor.set_target("workflow", workflow)
 
     def _on_trigger_selected(self, row: int) -> None:
         self._current_trigger_index = row
         if row >= 0:
             self.action_list.blockSignals(True)
             self.action_list.clearSelection()
+            self.action_list.setCurrentRow(-1)
             self.action_list.blockSignals(False)
+            self._current_action_index = -1
+
+            self.rules_editor.clear_selection_focus()
 
         trigger = self._get_current_trigger()
         if trigger is not None:
@@ -1191,13 +1320,22 @@ class AutomationSettingsPage(QWidget):
         if row >= 0:
             self.trigger_list.blockSignals(True)
             self.trigger_list.clearSelection()
+            self.trigger_list.setCurrentRow(-1)
             self.trigger_list.blockSignals(False)
+            self._current_trigger_index = -1
+
+            self.rules_editor.clear_selection_focus()
 
         action = self._get_current_action()
         if action is not None:
             self.property_editor.set_target("action", action)
         elif self._get_current_workflow() is not None:
             self.property_editor.set_target("workflow", self._get_current_workflow())
+
+    def _on_ruleset_target_changed(self, kind: str, target: object) -> None:
+        self._clear_trigger_action_selection()
+        if target is not None:
+            self.property_editor.set_target(kind, target)
 
     # =========================================================
     # Property changed
@@ -1210,13 +1348,13 @@ class AutomationSettingsPage(QWidget):
             self._set_status_saved()
         except Exception as e:
             self._set_status_error(f"保存属性失败：{e}")
-            QMessageBox.critical(self, "自动化", f"保存属性失败：\n{e}")
+            self._show_error_dialog("自动化", f"保存属性失败：\n{e}")
 
     def _on_ruleset_changed(self) -> None:
         try:
             self.controller.save_current()
             self._refresh_summary_texts_only()
-            self._set_status_saved("已修改规则集，并保存到文件。若要影响当前会话，请点击“应用到运行时”。")
+            self._set_status_saved("已修改规则集结构，并保存到文件。若要影响当前会话，请点击“应用到运行时”。")
         except Exception as e:
             self._set_status_error(f"保存规则集失败：{e}")
-            QMessageBox.critical(self, "自动化", f"保存规则集失败：\n{e}")
+            self._show_error_dialog("自动化", f"保存规则集失败：\n{e}")
