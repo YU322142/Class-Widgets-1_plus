@@ -6,7 +6,7 @@ from automation.models import AppRestartActionSettings
 from automation.registry import register_action
 
 
-@register_action("classisland.app.restart", "重启 ClassIsland", add_default_to_menu=False)
+@register_action("classisland.app.restart", "重启 ClassWidgets", add_default_to_menu=False)
 class AppRestartAction(ActionBaseT[AppRestartActionSettings]):
     async def OnInvoke(self) -> None:
         if self.Context is None or getattr(self.Context, "app_restart", None) is None:

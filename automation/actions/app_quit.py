@@ -5,7 +5,7 @@ from automation.context import maybe_await
 from automation.registry import register_action
 
 
-@register_action("classisland.app.quit", "退出 ClassIsland", add_default_to_menu=False)
+@register_action("classisland.app.quit", "退出 ClassWidgets", add_default_to_menu=False)
 class AppQuitAction(ActionBase):
     async def OnInvoke(self) -> None:
         if self.Context is None or getattr(self.Context, "app_quit", None) is None:

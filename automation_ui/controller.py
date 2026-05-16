@@ -37,7 +37,6 @@ class AutomationUiController:
         self.runtime = runtime
         self.conf = conf_module
 
-        # 触发器分组：更贴近 CW / 中文语义
         self._trigger_groups: dict[str, list[tuple[str, str]]] = {
             "应用生命周期": [
                 ("classisland.lifetime.startup", "应用启动时"),
@@ -59,7 +58,6 @@ class AutomationUiController:
             ],
         }
 
-        # 动作分组：去掉 ClassIsland 遗留命名
         self._action_groups: dict[str, list[tuple[str, str]]] = {
             "提醒通知": [
                 ("classisland.showNotification", "显示提醒"),
@@ -172,6 +170,24 @@ class AutomationUiController:
 
     def has_live_runtime(self) -> bool:
         return bool(getattr(self.runtime, "has_live_runtime", False))
+
+    def can_test_actions(self) -> bool:
+        return (
+            self.has_live_runtime()
+            and hasattr(self.runtime, "test_invoke_workflow")
+            and hasattr(self.runtime, "test_revert_workflow")
+        )
+
+    def test_invoke_workflow(self, workflow: Workflow):
+        if not self.can_test_actions():
+            raise RuntimeError("当前没有连接到运行中的自动化服务，无法测试触发。")
+        return self.runtime.test_invoke_workflow(workflow)
+
+    def test_revert_workflow(self, workflow: Workflow):
+        if not self.can_test_actions():
+            raise RuntimeError("当前没有连接到运行中的自动化服务，无法测试恢复。")
+        return self.runtime.test_revert_workflow(workflow)
+
 
     # =========================================================
     # Workflows
@@ -407,6 +423,10 @@ class AutomationUiController:
         }
         return mapping.get(name, name)
 
+    @staticmethod
+    def _bool_cn(value: bool) -> str:
+        return "启用" if bool(value) else "禁用"
+
     def workflow_display_text(self, workflow: Workflow) -> str:
         name = workflow.ActionSet.Name or "未命名工作流"
         enabled = "启用" if workflow.ActionSet.IsEnabled else "禁用"
@@ -507,7 +527,7 @@ class AutomationUiController:
                 return f"（切换配置：{text}）"
 
             if name == "IsAutomationEnabled":
-                return f"（自动化总开关：{'启用' if bool(value) else '禁用'}）"
+                return f"（自动化总开关：{self._bool_cn(bool(value))}）"
 
             if name:
                 value_text = self._truncate(str(value or ""))

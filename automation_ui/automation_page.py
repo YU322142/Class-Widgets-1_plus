@@ -18,6 +18,9 @@ from qfluentwidgets import (
     CaptionLabel,
     CheckBox,
     ComboBox,
+    Flyout,
+    FlyoutAnimationType,
+    InfoBarIcon,
     LineEdit,
     ListWidget,
     MessageBox,
@@ -29,6 +32,7 @@ from qfluentwidgets import (
     SubtitleLabel,
     TitleLabel,
 )
+
 
 from .controller import AutomationUiController
 from .property_editor import AutomationPropertyEditor
@@ -54,11 +58,11 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "classisland.showNotification": "显示 CW 风格提醒。注意：主提示与详细内容会同时显示，不是先标题再正文。",
     "classisland.notification.weather": "显示天气提醒，包括三天天气、天气预警、逐小时天气。",
     "classisland.os.run": "运行程序、命令、文件、文件夹或 URL。",
-    "classisland.settings": "修改自动化自身设置（如当前配置、自动化开关）。当前不是 ClassIsland 那种完整全应用设置编辑器。",
+    "classisland.settings": "修改自动化自身设置（如当前配置、自动化开关）。当前不是完整的全应用设置编辑器。",
     "classisland.broadcastSignal": "广播一个应用内信号，可用于联动其他 SignalTrigger。",
     "classisland.action.sleep": "等待指定时长，常用于串行动作之间的延迟。",
-    "classisland.app.quit": "退出当前应用。",
-    "classisland.app.restart": "重启当前应用。",
+    "classisland.app.quit": "退出应用。",
+    "classisland.app.restart": "重启应用。",
 }
 
 
@@ -152,6 +156,15 @@ class SectionHeader(QWidget):
 
 
 class AutomationTextFieldDialog(MessageBoxBase):
+    """
+    自动化配置名输入框。
+
+    注意：
+    - 这里必须继承 MessageBoxBase，而不是 Dialog。
+    - parent 需要传完整 SettingsMenu，即 AutomationSettingsPage.window()。
+    - 这样遮罩、弹出动效、暗色背景才和设置页其它 MessageBox 一致。
+    """
+
     def __init__(
         self,
         parent=None,
@@ -161,33 +174,127 @@ class AutomationTextFieldDialog(MessageBoxBase):
         validator=None,
     ) -> None:
         super().__init__(parent)
-
         self._validator = validator
 
-        self.titleLabel = SubtitleLabel(title)
-        self.contentLabel = BodyLabel(text)
+        self.titleLabel = SubtitleLabel(title, self)
+        self.contentLabel = BodyLabel(text, self)
         self.contentLabel.setWordWrap(True)
-        self.textField = LineEdit()
+
+        self.textField = LineEdit(self)
         self.textField.setPlaceholderText(placeholder)
         self.textField.setClearButtonEnabled(True)
-        self.tipLabel = CaptionLabel("")
+
+        self.tipLabel = CaptionLabel("", self)
         self.tipLabel.setWordWrap(True)
         self.tipLabel.setStyleSheet("color: #666;")
-
-        self.yesButton.setText("确定")
-        self.cancelButton.setText("取消")
-        self.yesButton.setEnabled(False)
 
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.contentLabel)
         self.viewLayout.addWidget(self.textField)
         self.viewLayout.addWidget(self.tipLabel)
-        self.widget.setMinimumWidth(380)
+
+        # 尺寸参考 menu.py 里的 CustomMessageBox，不要做特殊居中/特殊动效。
+        self.widget.setMinimumWidth(350)
+
+        self.yesButton.setText("确定")
+        self.cancelButton.setText("取消")
+        self.yesButton.setEnabled(False)
 
         self.textField.textChanged.connect(self._on_text_changed)
+        self.textField.returnPressed.connect(self._on_return_pressed)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self.textField.setFocus)
+
+    def _on_return_pressed(self) -> None:
+        if self.yesButton.isEnabled():
+            self.yesButton.click()
 
     def _on_text_changed(self, text: str) -> None:
         text = (text or "").strip()
+
+        if not text:
+            self.tipLabel.setStyleSheet("color: #c42b1c;")
+            self.tipLabel.setText("名称不能为空。")
+            self.yesButton.setEnabled(False)
+            return
+
+        if self._validator is not None:
+            ok, message = self._validator(text)
+            if not ok:
+                self.tipLabel.setStyleSheet("color: #c42b1c;")
+                self.tipLabel.setText(message)
+                self.yesButton.setEnabled(False)
+                return
+
+        self.tipLabel.setStyleSheet("color: #0f7b0f;")
+        self.tipLabel.setText("可以使用这个名称。")
+        self.yesButton.setEnabled(True)
+
+    def text(self) -> str:
+        return self.textField.text().strip()
+
+
+class AutomationTextFieldDialog(MessageBoxBase):
+    """
+    自动化配置名输入框。
+
+    注意：
+    - 这里必须继承 MessageBoxBase，而不是 Dialog。
+    - parent 需要传完整 SettingsMenu，即 AutomationSettingsPage.window()。
+    - 这样遮罩、弹出动效、暗色背景才和设置页其它 MessageBox 一致。
+    """
+
+    def __init__(
+        self,
+        parent=None,
+        title: str = "标题",
+        text: str = "请输入内容",
+        placeholder: str = "",
+        validator=None,
+    ) -> None:
+        super().__init__(parent)
+        self._validator = validator
+
+        self.titleLabel = SubtitleLabel(title, self)
+        self.contentLabel = BodyLabel(text, self)
+        self.contentLabel.setWordWrap(True)
+
+        self.textField = LineEdit(self)
+        self.textField.setPlaceholderText(placeholder)
+        self.textField.setClearButtonEnabled(True)
+
+        self.tipLabel = CaptionLabel("", self)
+        self.tipLabel.setWordWrap(True)
+        self.tipLabel.setStyleSheet("color: #666;")
+
+        self.viewLayout.addWidget(self.titleLabel)
+        self.viewLayout.addWidget(self.contentLabel)
+        self.viewLayout.addWidget(self.textField)
+        self.viewLayout.addWidget(self.tipLabel)
+
+        # 尺寸参考 menu.py 里的 CustomMessageBox，不要做特殊居中/特殊动效。
+        self.widget.setMinimumWidth(350)
+
+        self.yesButton.setText("确定")
+        self.cancelButton.setText("取消")
+        self.yesButton.setEnabled(False)
+
+        self.textField.textChanged.connect(self._on_text_changed)
+        self.textField.returnPressed.connect(self._on_return_pressed)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self.textField.setFocus)
+
+    def _on_return_pressed(self) -> None:
+        if self.yesButton.isEnabled():
+            self.yesButton.click()
+
+    def _on_text_changed(self, text: str) -> None:
+        text = (text or "").strip()
+
         if not text:
             self.tipLabel.setStyleSheet("color: #c42b1c;")
             self.tipLabel.setText("名称不能为空。")
@@ -334,19 +441,11 @@ class GroupedPickerDialog(QDialog):
         item = self.item_list.currentItem()
         if item is None:
             return
-
         self.selected_id = item.data(Qt.UserRole)
         self.accept()
 
 
 class AutomationSettingsPage(QWidget):
-    """
-    左右响应式：
-    - 左：启用自动化 / 配置文件 / 当前状态 / 参数设置
-    - 右：工作流 / 触发器 / 条件 / 动作
-    - 只做左右响应式，右侧内部保持自然纵向布局
-    """
-
     def __init__(self, runtime: Any, conf_module: Any, parent=None) -> None:
         super().__init__(parent)
         self.controller = AutomationUiController(runtime, conf_module)
@@ -365,6 +464,152 @@ class AutomationSettingsPage(QWidget):
 
         QTimer.singleShot(0, self._apply_initial_sizes)
 
+    # =========================================================
+    # MessageBox / Flyout helpers
+    # =========================================================
+
+    def _dialog_host(self) -> QWidget:
+        """
+        自动化页是 SettingsMenu 内部的一个子页面。
+
+        普通设置页里调用 MessageBox 时，parent 通常是 SettingsMenu 自己；
+        但这里的 self 是 AutomationSettingsPage。
+        如果 parent 传 self，黑色遮罩和弹出动效只会覆盖自动化子页，
+        视觉上就和其它设置页不一致。
+
+        所以这里统一返回完整设置窗口 self.window()。
+        """
+        host = self.window()
+        return host if host is not None else self
+
+    def _center_window_dialog(self, dialog: QWidget) -> None:
+        """
+        只给普通 QDialog 使用，例如添加触发器/动作的选择器。
+
+        MessageBox / MessageBoxBase 不要手动居中。
+        它们要使用 qfluentwidgets 自带的遮罩和动画。
+        """
+        host = self._dialog_host()
+
+        try:
+            dialog.adjustSize()
+        except Exception:
+            pass
+
+        try:
+            host_geo = host.frameGeometry() if host.isWindow() else host.geometry()
+            geo = dialog.frameGeometry()
+            geo.moveCenter(host_geo.center())
+            dialog.move(geo.topLeft())
+        except Exception:
+            pass
+
+    def _exec_dialog(self, dialog) -> int:
+        if hasattr(dialog, "exec"):
+            return dialog.exec()
+        return dialog.exec_()
+
+    def _show_info_dialog(self, title: str, content: str) -> None:
+        """
+        和设置页“什么是灵活隐藏？”保持同款 MessageBox 效果。
+        """
+        w = MessageBox(title, content, self._dialog_host())
+        w.yesButton.setText("知道了")
+        w.cancelButton.hide()
+        self._exec_dialog(w)
+
+    def _show_error_dialog(self, title: str, content: str) -> None:
+        """
+        错误提示也使用设置页统一 MessageBox。
+        """
+        w = MessageBox(title, content, self._dialog_host())
+        w.yesButton.setText("知道了")
+        w.cancelButton.hide()
+        self._exec_dialog(w)
+
+    def _ask_confirm(
+        self,
+        title: str,
+        content: str,
+        yes_text: str = "确定",
+        cancel_text: str = "取消",
+    ) -> bool:
+        """
+        确认弹窗统一使用 qfluentwidgets.MessageBox。
+
+        不使用 Dialog。
+        不使用自动化页专属样式。
+        parent 必须是完整 SettingsMenu。
+        """
+        w = MessageBox(title, content, self._dialog_host())
+        w.yesButton.setText(yes_text)
+        w.cancelButton.setText(cancel_text)
+        return bool(self._exec_dialog(w))
+
+    def _show_tip_flyout(
+        self,
+        title: str,
+        content: str,
+        target: QWidget | None = None,
+        icon=InfoBarIcon.INFORMATION,
+    ) -> None:
+        """
+        保存成功、测试已开始等轻量提示使用设置页常用 Flyout。
+        注意 parent 同样使用完整设置窗口，保证视觉层级一致。
+        """
+        target = target or self.status_card
+
+        try:
+            Flyout.create(
+                icon=icon,
+                title=title,
+                content=content,
+                target=target,
+                parent=self._dialog_host(),
+                isClosable=True,
+                aniType=FlyoutAnimationType.PULL_UP,
+            )
+        except Exception:
+            self._set_status_info(f"{title}：{content}")
+
+
+    def _show_tip_flyout(
+        self,
+        title: str,
+        content: str,
+        target: QWidget | None = None,
+        icon=InfoBarIcon.INFORMATION,
+    ) -> None:
+        """
+        统一设置页 Flyout 风格。
+        保存 / 应用 / 测试这类轻量反馈不再弹模态框，和其它设置页保持一致。
+        """
+        target = target or self.status_card
+        parent = self._dialog_host()
+
+        try:
+            flyout = Flyout.create(
+                icon=icon,
+                title=title,
+                content=content,
+                target=target,
+                parent=parent,
+                isClosable=True,
+                aniType=FlyoutAnimationType.PULL_UP,
+            )
+            try:
+                flyout.setFocusPolicy(Qt.NoFocus)
+            except Exception:
+                pass
+        except Exception:
+            # Flyout 创建失败时至少不要丢反馈
+            self._set_status_info(f"{title}：{content}")
+
+
+    # =========================================================
+    # Main UI
+    # =========================================================
+
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 24, 24, 0)
@@ -373,7 +618,7 @@ class AutomationSettingsPage(QWidget):
         self.title_label = TitleLabel("自动化")
         root.addWidget(self.title_label)
 
-        self.subtitle_label = CaptionLabel("通过“触发器 + 条件 + 动作”的方式，让应用在不同场景下自动执行任务。")
+        self.subtitle_label = CaptionLabel('通过“触发器 + 条件 + 动作”的方式，让应用在不同场景下自动执行任务。')
         self.subtitle_label.setWordWrap(True)
         self.subtitle_label.setStyleSheet("color: #666;")
         root.addWidget(self.subtitle_label)
@@ -385,9 +630,6 @@ class AutomationSettingsPage(QWidget):
         self.main_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         root.addWidget(self.main_splitter, 1)
 
-        # =========================
-        # 左栏
-        # =========================
         self.left_scroll = SmoothScrollArea()
         self.left_scroll.setStyleSheet(_scroll_style())
         self.left_scroll.setWidgetResizable(True)
@@ -495,9 +737,6 @@ class AutomationSettingsPage(QWidget):
 
         left_layout.addStretch(1)
 
-        # =========================
-        # 右栏
-        # =========================
         self.right_scroll = SmoothScrollArea()
         self.right_scroll.setStyleSheet(_scroll_style())
         self.right_scroll.setWidgetResizable(True)
@@ -642,6 +881,36 @@ class AutomationSettingsPage(QWidget):
             102,
         )
 
+        action_test_btns = QHBoxLayout()
+        action_test_btns.setSpacing(10)
+        self.test_action_invoke_btn = PrimaryPushButton("测试触发")
+        self.test_action_revert_btn = PushButton("测试恢复")
+
+        self.test_action_invoke_btn.setToolTip("立即执行当前工作流的动作，用于测试触发效果。")
+        self.test_action_revert_btn.setToolTip("立即执行当前工作流的恢复流程，用于测试恢复效果。")
+
+        action_test_btns.addWidget(self.test_action_invoke_btn)
+        action_test_btns.addWidget(self.test_action_revert_btn)
+        action_test_btns.addStretch(1)
+        action_layout.addLayout(action_test_btns)
+
+        self._set_responsive_button_widths(
+            [
+                self.test_action_invoke_btn,
+                self.test_action_revert_btn,
+            ],
+            112,
+        )
+
+        self.action_test_tip = CaptionLabel(
+            "测试会立即在当前会话执行当前工作流的动作；会绕过触发器和条件。"
+            "如果动作中包含运行程序、修改设置、退出或重启，它们都会真实执行。"
+        )
+        self.action_test_tip.setWordWrap(True)
+        self.action_test_tip.setStyleSheet("color: #8a5a00;")
+        action_layout.addWidget(self.action_test_tip)
+
+
         right_layout.addWidget(self.action_card)
         right_layout.addStretch(1)
 
@@ -661,34 +930,7 @@ class AutomationSettingsPage(QWidget):
         self.main_splitter.setSizes([left, right])
 
     # =========================================================
-    # Dialog helpers
-    # =========================================================
-
-    def _show_info_dialog(self, title: str, content: str) -> None:
-        w = MessageBox(title, content, self)
-        w.yesButton.setText("好")
-        w.cancelButton.hide()
-        w.buttonLayout.insertStretch(0, 1)
-        w.setFixedWidth(560)
-        w.exec()
-
-    def _show_error_dialog(self, title: str, content: str) -> None:
-        w = MessageBox(title, content, self)
-        w.yesButton.setText("好")
-        w.cancelButton.hide()
-        w.buttonLayout.insertStretch(0, 1)
-        w.setFixedWidth(560)
-        w.exec()
-
-    def _ask_confirm(self, title: str, content: str, yes_text: str = "确定", cancel_text: str = "取消") -> bool:
-        w = MessageBox(title, content, self)
-        w.yesButton.setText(yes_text)
-        w.cancelButton.setText(cancel_text)
-        w.setFixedWidth(560)
-        return bool(w.exec())
-
-    # =========================================================
-    # Status helpers
+    # Status
     # =========================================================
 
     def _set_status_style(self, fg: str, bg: str) -> None:
@@ -721,13 +963,13 @@ class AutomationSettingsPage(QWidget):
             if self.controller.has_live_runtime():
                 text = "已保存到文件，尚未应用到当前运行时。点击“应用到运行时”后，当前会话将被当前配置文件整体替换。"
             else:
-                text = "已保存到文件。当前无 live runtime。"
+                text = "已保存到文件。"
         self.status_label.setText(text)
         self._set_status_style("#8a5a00", "rgba(255, 170, 0, 0.10)")
 
     def _set_status_applied(self, text: str | None = None) -> None:
         if text is None:
-            text = "已应用到当前运行时。当前会话已按当前配置文件重新加载。"
+            text = "已应用到当前运行时。"
         self.status_label.setText(text)
         self._set_status_style("#1e6b34", "rgba(46, 204, 113, 0.10)")
 
@@ -740,7 +982,7 @@ class AutomationSettingsPage(QWidget):
         wf_count = len(self.controller.workflows)
         if self.controller.has_live_runtime():
             return f"当前正在编辑配置：{name}（{wf_count} 个工作流）。修改后请先保存，若要影响当前会话，请点击“应用到运行时”。"
-        return f"当前正在编辑配置：{name}（{wf_count} 个工作流）。当前无 live runtime，仅文件编辑模式。"
+        return f"当前正在编辑配置：{name}（{wf_count} 个工作流）。仅文件编辑模式。"
 
     def _update_config_info(self) -> None:
         name = self.controller.get_current_config_name()
@@ -777,6 +1019,9 @@ class AutomationSettingsPage(QWidget):
         self.del_action_btn.clicked.connect(self._on_delete_action)
         self.action_up_btn.clicked.connect(self._on_action_up)
         self.action_down_btn.clicked.connect(self._on_action_down)
+        self.test_action_invoke_btn.clicked.connect(self._on_test_invoke_actions)
+        self.test_action_revert_btn.clicked.connect(self._on_test_revert_actions)
+
 
         self.workflow_list.currentRowChanged.connect(self._on_workflow_selected)
         self.trigger_list.currentRowChanged.connect(self._on_trigger_selected)
@@ -788,7 +1033,7 @@ class AutomationSettingsPage(QWidget):
         self.config_combo.currentIndexChanged.connect(self._on_config_changed)
 
     # =========================================================
-    # Reload UI
+    # Reload
     # =========================================================
 
     def _reload_all(self) -> None:
@@ -814,7 +1059,6 @@ class AutomationSettingsPage(QWidget):
             configs = self.controller.list_configs()
 
         current = self.controller.get_current_config_name()
-
         for name in configs:
             self.config_combo.addItem(name)
 
@@ -826,19 +1070,32 @@ class AutomationSettingsPage(QWidget):
         self.workflow_list.clear()
 
         for workflow in self.controller.workflows:
-            self.workflow_list.addItem(QListWidgetItem(self.controller.workflow_display_text(workflow)))
+            self.workflow_list.addItem(
+                QListWidgetItem(self.controller.workflow_display_text(workflow))
+            )
 
         if self.controller.workflows:
             if self._current_workflow_index < 0:
                 self._current_workflow_index = 0
-            self._current_workflow_index = min(self._current_workflow_index, len(self.controller.workflows) - 1)
+
+            self._current_workflow_index = min(
+                self._current_workflow_index,
+                len(self.controller.workflows) - 1,
+            )
             self.workflow_list.setCurrentRow(self._current_workflow_index)
         else:
             self._current_workflow_index = -1
+            self._current_trigger_index = -1
+            self._current_action_index = -1
+
             self.trigger_list.clear()
             self.action_list.clear()
             self.rules_editor.set_workflow(None)
             self.property_editor.set_target(None, None)
+
+        self._update_config_info()
+        self._update_action_test_buttons()
+
 
     def _reload_middle(self) -> None:
         self.trigger_list.clear()
@@ -849,26 +1106,30 @@ class AutomationSettingsPage(QWidget):
             self.rules_editor.set_workflow(None)
             self.property_editor.set_target(None, None)
             self._update_config_info()
+            self._update_action_test_buttons()
             return
 
         for trigger in workflow.Triggers:
-            self.trigger_list.addItem(QListWidgetItem(self.controller.trigger_display_text(trigger)))
+            self.trigger_list.addItem(
+                QListWidgetItem(self.controller.trigger_display_text(trigger))
+            )
 
         for action in workflow.ActionSet.Actions:
-            self.action_list.addItem(QListWidgetItem(self.controller.action_display_text(action)))
+            self.action_list.addItem(
+                QListWidgetItem(self.controller.action_display_text(action))
+            )
 
         self.rules_editor.set_workflow(workflow)
 
         if self._current_trigger_index >= 0:
-            trigger = self._get_current_trigger()
-            self.property_editor.set_target("trigger", trigger)
+            self.property_editor.set_target("trigger", self._get_current_trigger())
         elif self._current_action_index >= 0:
-            action = self._get_current_action()
-            self.property_editor.set_target("action", action)
+            self.property_editor.set_target("action", self._get_current_action())
         else:
             self.property_editor.set_target("workflow", workflow)
 
         self._update_config_info()
+        self._update_action_test_buttons()
 
     def _refresh_summary_texts_only(self) -> None:
         for i, workflow in enumerate(self.controller.workflows):
@@ -895,8 +1156,30 @@ class AutomationSettingsPage(QWidget):
         self.rules_editor.refresh_display_texts()
         self._update_config_info()
 
+    def _update_action_test_buttons(self) -> None:
+        workflow = self._get_current_workflow()
+        has_actions = (
+            workflow is not None
+            and workflow.ActionSet is not None
+            and bool(workflow.ActionSet.Actions)
+        )
+        can_test = bool(has_actions and self.controller.can_test_actions())
+
+        self.test_action_invoke_btn.setEnabled(can_test)
+        self.test_action_revert_btn.setEnabled(can_test)
+
+        if not self.controller.can_test_actions():
+            tip = "当前没有连接到运行中的自动化服务，无法测试动作。"
+        elif not has_actions:
+            tip = "请先选择一个包含动作的工作流。"
+        else:
+            tip = "会立即在当前会话执行动作，请谨慎测试。"
+
+        self.test_action_invoke_btn.setToolTip(tip)
+        self.test_action_revert_btn.setToolTip(tip)
+
     # =========================================================
-    # Current object helpers
+    # Current helpers
     # =========================================================
 
     def _get_current_workflow(self):
@@ -940,15 +1223,17 @@ class AutomationSettingsPage(QWidget):
 
     def _pick_trigger_id(self) -> str | None:
         groups = self.controller.available_trigger_groups()
-        dlg = GroupedPickerDialog("添加触发器", groups, TRIGGER_DESCRIPTIONS, self)
-        if dlg.exec_() == QDialog.Accepted:
+        dlg = GroupedPickerDialog("添加触发器", groups, TRIGGER_DESCRIPTIONS, self._dialog_host())
+        self._center_window_dialog(dlg)
+        if self._exec_dialog(dlg) == QDialog.Accepted:
             return dlg.selected_id
         return None
 
     def _pick_action_id(self) -> str | None:
         groups = self.controller.available_action_groups()
-        dlg = GroupedPickerDialog("添加动作", groups, ACTION_DESCRIPTIONS, self)
-        if dlg.exec_() == QDialog.Accepted:
+        dlg = GroupedPickerDialog("添加动作", groups, ACTION_DESCRIPTIONS, self._dialog_host())
+        self._center_window_dialog(dlg)
+        if self._exec_dialog(dlg) == QDialog.Accepted:
             return dlg.selected_id
         return None
 
@@ -967,22 +1252,31 @@ class AutomationSettingsPage(QWidget):
                 return True, "可以使用。"
 
             dlg = AutomationTextFieldDialog(
-                self,
+                self._dialog_host(),
                 title="新建配置",
                 text="请输入新的自动化配置名称。",
                 placeholder="例如：我的配置",
                 validator=_validator,
             )
-            if not dlg.exec():
+
+            if self._exec_dialog(dlg) != QDialog.Accepted:
                 return
 
             created = self.controller.create_config(dlg.text())
             self._reload_all()
+
             idx = self.config_combo.findText(created)
             if idx >= 0:
                 self.config_combo.setCurrentIndex(idx)
 
             self._set_status_saved(f"已新建配置：{created}。当前正在编辑新配置文件。")
+            self._show_tip_flyout(
+                "新建配置成功",
+                f"已创建自动化配置“{created}”。",
+                self.new_config_btn,
+                InfoBarIcon.SUCCESS,
+            )
+
         except Exception as e:
             self._set_status_error(f"新建配置失败：{e}")
             self._show_error_dialog("自动化", f"新建配置失败：\n{e}")
@@ -1009,17 +1303,13 @@ class AutomationSettingsPage(QWidget):
             self._set_status_error(f"删除配置失败：{e}")
             self._show_error_dialog("自动化", f"删除配置失败：\n{e}")
 
-    # =========================================================
-    # Global / top bar
-    # =========================================================
-
     def _on_global_enabled_changed(self, state: bool) -> None:
         try:
             settings = self.controller.runtime.context.settings
             if hasattr(settings, "IsAutomationEnabled"):
                 settings.IsAutomationEnabled = bool(state)
             self.controller.save_current()
-            self._set_status_saved("已修改“启用自动化”状态，并保存到文件。若要影响当前会话，请点击“应用到运行时”。")
+            self._set_status_saved('已修改“启用自动化”状态，并保存到文件。若要影响当前会话，请点击“应用到运行时”。')
         except Exception as e:
             self._set_status_error(f"修改启用状态失败：{e}")
             self._show_error_dialog("自动化", f"修改启用状态失败：\n{e}")
@@ -1043,7 +1333,12 @@ class AutomationSettingsPage(QWidget):
             self.controller.save_current()
             self._set_status_saved()
             self._update_config_info()
-            self._show_info_dialog("自动化", "自动化配置已保存到文件。")
+            self._show_tip_flyout(
+                "保存成功",
+                "自动化配置已保存到文件。",
+                self.save_btn,
+                InfoBarIcon.SUCCESS,
+            )
         except Exception as e:
             self._set_status_error(f"保存配置失败：{e}")
             self._show_error_dialog("自动化", f"保存配置失败：\n{e}")
@@ -1055,12 +1350,12 @@ class AutomationSettingsPage(QWidget):
 
             if self.controller.has_live_runtime():
                 if not self._ask_confirm(
-                    "应用到运行时",
-                    f"将使用当前配置文件“{config_name}”中的 {wf_count} 个工作流替换当前运行时。\n\n"
-                    f"这不会合并旧工作流，而是整体重载。\n\n"
-                    f"是否继续？",
-                    yes_text="继续",
-                    cancel_text="取消",
+                        "应用到运行时",
+                        f"将使用当前配置文件“{config_name}”中的 {wf_count} 个工作流替换当前运行时。\n\n"
+                        "这不会合并旧工作流，而是整体重载。\n\n"
+                        "是否继续？",
+                        yes_text="继续",
+                        cancel_text="取消",
                 ):
                     return
 
@@ -1076,6 +1371,12 @@ class AutomationSettingsPage(QWidget):
             else:
                 self._set_status_saved("当前没有可应用的运行时，已仅保存到文件。")
                 self._show_info_dialog("自动化", "当前没有可应用的运行时，仅保存到了文件。")
+
+        except Exception as e:
+            self._set_status_error(f"应用到运行时失败：{e}")
+            self._show_error_dialog("自动化", f"应用到运行时失败：\n{e}")
+
+
         except Exception as e:
             self._set_status_error(f"应用到运行时失败：{e}")
             self._show_error_dialog("自动化", f"应用到运行时失败：\n{e}")
@@ -1101,14 +1402,14 @@ class AutomationSettingsPage(QWidget):
 
             self._set_status_saved(
                 f"当前正在编辑配置：{name}。"
-                + (" 已切换文件，若要影响当前会话，请点击“应用到运行时”。" if self.controller.has_live_runtime() else " 当前无 live runtime，仅文件编辑模式。")
+                + (" 已切换文件，若要影响当前会话，请点击“应用到运行时”。" if self.controller.has_live_runtime() else " 仅文件编辑模式。")
             )
         except Exception as e:
             self._set_status_error(f"切换配置文件失败：{e}")
             self._show_error_dialog("自动化", f"切换配置文件失败：\n{e}")
 
     # =========================================================
-    # Workflow actions
+    # Workflow
     # =========================================================
 
     def _on_new_workflow(self) -> None:
@@ -1119,7 +1420,7 @@ class AutomationSettingsPage(QWidget):
             self._current_action_index = -1
             self._reload_workflows()
             self.rules_editor.clear_selection_focus()
-            self._set_status_saved("已新建工作流，并保存到文件。若要当前会话生效，请点击“应用到运行时”。")
+            self._set_status_saved("已新建工作流，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"新建工作流失败：{e}")
             self._show_error_dialog("自动化", f"新建工作流失败：\n{e}")
@@ -1134,7 +1435,7 @@ class AutomationSettingsPage(QWidget):
             self._current_workflow_index = min(self._current_workflow_index, len(self.controller.workflows) - 1)
             self._reload_workflows()
             self.rules_editor.clear_selection_focus()
-            self._set_status_saved("已删除工作流，并保存到文件。若要当前会话生效，请点击“应用到运行时”。")
+            self._set_status_saved("已删除工作流，并保存到文件。")
         except Exception as e:
             self._set_status_error(f"删除工作流失败：{e}")
             self._show_error_dialog("自动化", f"删除工作流失败：\n{e}")
@@ -1160,7 +1461,7 @@ class AutomationSettingsPage(QWidget):
             self._show_error_dialog("自动化", f"下移工作流失败：\n{e}")
 
     # =========================================================
-    # Trigger actions
+    # Trigger
     # =========================================================
 
     def _on_add_trigger(self) -> None:
@@ -1222,7 +1523,7 @@ class AutomationSettingsPage(QWidget):
             self._show_error_dialog("自动化", f"下移触发器失败：\n{e}")
 
     # =========================================================
-    # Action actions
+    # Action
     # =========================================================
 
     def _on_add_action(self) -> None:
@@ -1283,7 +1584,113 @@ class AutomationSettingsPage(QWidget):
             self._set_status_error(f"下移动作失败：{e}")
             self._show_error_dialog("自动化", f"下移动作失败：\n{e}")
 
-    # =========================================================
+    def _on_test_invoke_actions(self) -> None:
+        try:
+            workflow = self._get_current_workflow()
+            if workflow is None:
+                self._show_tip_flyout(
+                    "无法测试",
+                    "请先选择一个工作流。",
+                    self.test_action_invoke_btn,
+                    InfoBarIcon.WARNING,
+                )
+                return
+
+            action_count = len(workflow.ActionSet.Actions)
+            if action_count <= 0:
+                self._show_tip_flyout(
+                    "无法测试",
+                    "当前工作流没有动作，请先添加至少一个动作。",
+                    self.test_action_invoke_btn,
+                    InfoBarIcon.WARNING,
+                )
+                return
+
+            workflow_name = workflow.ActionSet.Name or "未命名工作流"
+
+            if not self._ask_confirm(
+                    "测试触发动作",
+                    f"将立即在当前会话执行工作流“{workflow_name}”中的 {action_count} 个动作。\n\n"
+                    "这会绕过触发器和条件，仅用于测试动作效果。\n\n"
+                    "注意：如果动作中包含运行程序、修改设置、退出或重启应用，它们都会真实执行。\n\n"
+                    "是否继续？",
+                    yes_text="立即测试",
+                    cancel_text="取消",
+            ):
+                return
+
+            # 保存编辑态，确保外部文件和内存一致；测试实际使用的是当前编辑态对象的副本
+            self.controller.save_current()
+            self.controller.test_invoke_workflow(workflow)
+
+            self._set_status_info(
+                f"已开始测试触发：{workflow_name}（{action_count} 个动作）。"
+            )
+            self._show_tip_flyout(
+                "测试已开始",
+                f"正在执行“{workflow_name}”的动作。",
+                self.test_action_invoke_btn,
+                InfoBarIcon.INFORMATION,
+            )
+
+        except Exception as e:
+            self._set_status_error(f"测试触发失败：{e}")
+            self._show_error_dialog("自动化", f"测试触发失败：\n{e}")
+
+    def _on_test_revert_actions(self) -> None:
+        try:
+            workflow = self._get_current_workflow()
+            if workflow is None:
+                self._show_tip_flyout(
+                    "无法测试恢复",
+                    "请先选择一个工作流。",
+                    self.test_action_revert_btn,
+                    InfoBarIcon.WARNING,
+                )
+                return
+
+            action_count = len(workflow.ActionSet.Actions)
+            if action_count <= 0:
+                self._show_tip_flyout(
+                    "无法测试恢复",
+                    "当前工作流没有动作，请先添加至少一个动作。",
+                    self.test_action_revert_btn,
+                    InfoBarIcon.WARNING,
+                )
+                return
+
+            workflow_name = workflow.ActionSet.Name or "未命名工作流"
+
+            if not self._ask_confirm(
+                    "测试恢复动作",
+                    f"将立即在当前会话执行工作流“{workflow_name}”的恢复流程。\n\n"
+                    "这会绕过触发器和条件，仅用于测试动作恢复效果。\n\n"
+                    "只有支持恢复的动作会真正执行恢复逻辑；如果之前没有执行过测试触发，部分动作可能不会产生明显效果。\n\n"
+                    "是否继续？",
+                    yes_text="立即恢复",
+                    cancel_text="取消",
+            ):
+                return
+
+            self.controller.save_current()
+            self.controller.test_revert_workflow(workflow)
+
+            self._set_status_info(
+                f"已开始测试恢复：{workflow_name}。"
+            )
+            self._show_tip_flyout(
+                "恢复测试已开始",
+                f"正在执行“{workflow_name}”的恢复流程。",
+                self.test_action_revert_btn,
+                InfoBarIcon.INFORMATION,
+            )
+
+        except Exception as e:
+            self._set_status_error(f"测试恢复失败：{e}")
+            self._show_error_dialog("自动化", f"测试恢复失败：\n{e}")
+
+
+        # =========================================================
     # Selection
     # =========================================================
 
@@ -1306,7 +1713,6 @@ class AutomationSettingsPage(QWidget):
             self.action_list.setCurrentRow(-1)
             self.action_list.blockSignals(False)
             self._current_action_index = -1
-
             self.rules_editor.clear_selection_focus()
 
         trigger = self._get_current_trigger()
@@ -1323,7 +1729,6 @@ class AutomationSettingsPage(QWidget):
             self.trigger_list.setCurrentRow(-1)
             self.trigger_list.blockSignals(False)
             self._current_trigger_index = -1
-
             self.rules_editor.clear_selection_focus()
 
         action = self._get_current_action()
@@ -1354,7 +1759,7 @@ class AutomationSettingsPage(QWidget):
         try:
             self.controller.save_current()
             self._refresh_summary_texts_only()
-            self._set_status_saved("已修改规则集结构，并保存到文件。若要影响当前会话，请点击“应用到运行时”。")
+            self._set_status_saved('已修改规则集结构，并保存到文件。若要影响当前会话，请点击“应用到运行时”。')
         except Exception as e:
             self._set_status_error(f"保存规则集失败：{e}")
             self._show_error_dialog("自动化", f"保存规则集失败：\n{e}")

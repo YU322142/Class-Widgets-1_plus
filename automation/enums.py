@@ -14,14 +14,31 @@ class TimeState(IntEnum):
     def from_value(cls, value: object) -> "TimeState":
         if isinstance(value, cls):
             return value
+
         if isinstance(value, int):
-            return cls(value)
+            try:
+                return cls(value)
+            except ValueError:
+                return cls.None_
+
         if isinstance(value, str):
-            if value == "None":
+            value = value.strip()
+
+            if value in ("None", "None_"):
                 return cls.None_
-            if value == "None_":
+
+            # 兼容 JSON / UI 保存成 "1"、"3"、"4" 的情况
+            if value.lstrip("+-").isdigit():
+                try:
+                    return cls(int(value))
+                except ValueError:
+                    return cls.None_
+
+            try:
+                return cls[value]
+            except KeyError:
                 return cls.None_
-            return cls[value]
+
         return cls.None_
 
 
@@ -35,10 +52,27 @@ class ActionSetStatus(IntEnum):
     def from_value(cls, value: object) -> "ActionSetStatus":
         if isinstance(value, cls):
             return value
+
         if isinstance(value, int):
-            return cls(value)
+            try:
+                return cls(value)
+            except ValueError:
+                return cls.Normal
+
         if isinstance(value, str):
-            return cls[value]
+            value = value.strip()
+
+            if value.lstrip("+-").isdigit():
+                try:
+                    return cls(int(value))
+                except ValueError:
+                    return cls.Normal
+
+            try:
+                return cls[value]
+            except KeyError:
+                return cls.Normal
+
         return cls.Normal
 
 
@@ -50,10 +84,27 @@ class RulesetLogicalMode(IntEnum):
     def from_value(cls, value: object) -> "RulesetLogicalMode":
         if isinstance(value, cls):
             return value
+
         if isinstance(value, int):
-            return cls(value)
+            try:
+                return cls(value)
+            except ValueError:
+                return cls.Or
+
         if isinstance(value, str):
-            return cls[value]
+            value = value.strip()
+
+            if value.lstrip("+-").isdigit():
+                try:
+                    return cls(int(value))
+                except ValueError:
+                    return cls.Or
+
+            try:
+                return cls[value]
+            except KeyError:
+                return cls.Or
+
         return cls.Or
 
 
@@ -68,11 +119,20 @@ class RunActionRunType(str, Enum):
     def from_value(cls, value: object) -> "RunActionRunType":
         if isinstance(value, cls):
             return value
+
         if isinstance(value, str):
+            value = value.strip()
+
             try:
                 return cls(value)
             except ValueError:
+                pass
+
+            try:
                 return cls[value]
+            except KeyError:
+                return cls.Application
+
         if isinstance(value, int):
             values = [
                 cls.Application,
@@ -83,6 +143,7 @@ class RunActionRunType(str, Enum):
             ]
             if 0 <= value < len(values):
                 return values[value]
+
         return cls.Application
 
 

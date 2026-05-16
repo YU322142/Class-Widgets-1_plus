@@ -1367,20 +1367,39 @@ class AutomationPropertyEditor(QWidget):
         combo_add_item(combo, "放学", TimeState.AfterSchool)
 
         allowed = {TimeState.OnClass, TimeState.Breaking, TimeState.AfterSchool}
-        current = getattr(obj, attr, TimeState.OnClass)
+
+        try:
+            current = TimeState.from_value(getattr(obj, attr, TimeState.OnClass))
+        except Exception:
+            current = TimeState.OnClass
+
+        # 兼容旧版本错误 UI 保存出来的 PrepareOnClass
+        if current == TimeState.PrepareOnClass:
+            current = TimeState.OnClass
+
         if current not in allowed:
             current = TimeState.OnClass
-            setattr(obj, attr, current)
+
+        setattr(obj, attr, current)
 
         idx = combo.findData(current)
         combo.setCurrentIndex(max(0, idx))
 
         def _on_changed(_):
-            setattr(obj, attr, combo_current_data(combo))
+            try:
+                selected = TimeState.from_value(combo_current_data(combo))
+            except Exception:
+                selected = TimeState.OnClass
+
+            if selected not in allowed:
+                selected = TimeState.OnClass
+
+            setattr(obj, attr, selected)
             self.changed.emit()
 
         combo.currentIndexChanged.connect(_on_changed)
         form.addRow(self._make_label(title), FieldWidget(combo, hint))
+
 
     def _add_window_state_combo(
         self,

@@ -971,20 +971,27 @@ def _select_bridge_blocks(
     next_class_block: Optional[Dict[str, Any]] = None
     next_break_block: Optional[Dict[str, Any]] = None
 
+    # 统一去掉微秒，避免 TimeManager / QTimer 的微小误差影响边界判断
+    now_without_ms = now.replace(microsecond=0)
+
     for block in blocks:
-        if not block["isbreak"] and block["end"] <= now:
+        start = block["start"].replace(microsecond=0)
+        end = block["end"].replace(microsecond=0)
+
+        if not block["isbreak"] and end <= now_without_ms:
             previous_class_block = block
 
-        if current_block is None and block["start"] <= now < block["end"]:
+        if current_block is None and start <= now_without_ms < end:
             current_block = block
 
-        if next_class_block is None and (not block["isbreak"]) and block["start"] >= now:
+        if next_class_block is None and (not block["isbreak"]) and start >= now_without_ms:
             next_class_block = block
 
-        if next_break_block is None and block["isbreak"] and block["start"] >= now:
+        if next_break_block is None and block["isbreak"] and start >= now_without_ms:
             next_break_block = block
 
     return current_block, previous_class_block, next_class_block, next_break_block
+
 
 
 def push_lessons_state_to_automation() -> None:

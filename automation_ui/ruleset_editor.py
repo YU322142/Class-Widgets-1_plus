@@ -1,21 +1,16 @@
 from __future__ import annotations
 
-from typing import Any
-
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QListWidgetItem,
-    QMessageBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
-    QSizePolicy,
 )
 from qfluentwidgets import (
     CaptionLabel,
-    ComboBox,
     ListWidget,
     PushButton,
     StrongBodyLabel,
@@ -201,9 +196,7 @@ class RulePickerDialog(QDialog):
     def _accept_current(self) -> None:
         item = self.rule_list.currentItem()
         if item is None:
-            QMessageBox.warning(self, "选择规则", "请先选择一个规则。")
             return
-
         self.selected_rule_id = item.data(Qt.UserRole)
         self.accept()
 
@@ -252,7 +245,6 @@ class RulesetEditor(QWidget):
         self.main_splitter.setStyleSheet("QSplitter::handle { background: transparent; }")
         root.addWidget(self.main_splitter, 1)
 
-        # 左：规则组
         self.left_panel = QWidget()
         left_layout = QVBoxLayout(self.left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -284,7 +276,6 @@ class RulesetEditor(QWidget):
 
         self.main_splitter.addWidget(self.left_panel)
 
-        # 右：规则
         self.right_panel = QWidget()
         right_layout = QVBoxLayout(self.right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -332,7 +323,7 @@ class RulesetEditor(QWidget):
         self.group_list.currentRowChanged.connect(self._on_group_selected)
         self.rule_list.currentRowChanged.connect(self._on_rule_selected)
 
-        # 关键修复：允许“点击已选中的组/规则”也切换属性面板
+        # 关键：即使重复点击当前项，也强制切换左下角属性面板
         self.group_list.itemClicked.connect(self._on_group_item_clicked)
         self.rule_list.itemClicked.connect(self._on_rule_item_clicked)
 
@@ -364,14 +355,21 @@ class RulesetEditor(QWidget):
             self._suspend_target_emit = False
 
     def clear_selection_focus(self) -> None:
+        """
+        只清“视觉选中”，保留当前规则组索引。
+        否则重载后直接点击规则时，会因为丢失 group index 导致无法解析当前规则。
+        """
         self._suspend_target_emit = True
         try:
-            self._current_group_index = -1
+            if self._current_group_index < 0 and self._workflow is not None:
+                groups = self._workflow.Ruleset.Groups
+                if groups:
+                    self._current_group_index = 0
+
             self._current_rule_index = -1
 
             self.group_list.blockSignals(True)
             self.group_list.clearSelection()
-            self.group_list.setCurrentRow(-1)
             self.group_list.blockSignals(False)
 
             self.rule_list.blockSignals(True)
@@ -532,10 +530,6 @@ class RulesetEditor(QWidget):
             return
         self.targetChanged.emit(kind, target)
 
-    # =========================================================
-    # Target selection
-    # =========================================================
-
     def _on_edit_ruleset(self) -> None:
         if self._workflow is None:
             return
@@ -553,7 +547,6 @@ class RulesetEditor(QWidget):
             return
         self._emit_target("rule", rule)
 
-    # 关键修复：点击已选中的规则组，也强制切换到规则组属性
     def _on_group_item_clicked(self, item) -> None:
         row = self.group_list.row(item)
         if row < 0:
@@ -571,20 +564,18 @@ class RulesetEditor(QWidget):
         if group is not None:
             self._emit_target("rule_group", group)
 
-    # 对称处理：点击已选中的规则，也强制切换到规则属性
     def _on_rule_item_clicked(self, item) -> None:
         row = self.rule_list.row(item)
         if row < 0:
             return
 
+        if self._current_group_index < 0 and self._workflow is not None and self._workflow.Ruleset.Groups:
+            self._current_group_index = 0
+
         self._current_rule_index = row
         rule = self._current_rule()
         if rule is not None:
             self._emit_target("rule", rule)
-
-    # =========================================================
-    # Group events
-    # =========================================================
 
     def _on_group_selected(self, row: int) -> None:
         self._current_group_index = row
@@ -672,11 +663,10 @@ class RulesetEditor(QWidget):
         self._emit_changed()
         self._emit_target("rule_group", self._current_group())
 
-    # =========================================================
-    # Rule events
-    # =========================================================
-
     def _on_rule_selected(self, row: int) -> None:
+        if self._current_group_index < 0 and self._workflow is not None and self._workflow.Ruleset.Groups:
+            self._current_group_index = 0
+
         self._current_rule_index = row
         self._update_buttons_state()
 
@@ -689,7 +679,7 @@ class RulesetEditor(QWidget):
         if group is None:
             return
 
-        dlg = RulePickerDialog(self)
+        dlg = RulePickerDialog(self.window() or self)
         if dlg.exec_() != QDialog.Accepted or not dlg.selected_rule_id:
             return
 
@@ -768,7 +758,7 @@ class RulesetEditor(QWidget):
         if rule is None:
             return
 
-        dlg = RulePickerDialog(self)
+        dlg = RulePickerDialog(self.window() or self)
         if dlg.exec_() != QDialog.Accepted or not dlg.selected_rule_id:
             return
 
