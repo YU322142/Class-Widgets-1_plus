@@ -5,12 +5,14 @@
 <p align="center">
   <img width="16%" align="center" src="img/Logo.png" alt="logo">
 </p>
-<h1 align="center">Class Widgets 1_plus</h1>
-<p align="center">Class Widgets 1 的简易修改版（Fork）</p>
+<h1 align="center">Class Widgets 1+</h1>
+<p align="center">Class Widgets 1 的第三方修改LTS？</p>
 
 <div align="center">
 
 > ⚠️ 该项目为基于上游项目的非官方修改版本，不隶属于原项目官方团队。
+
+> ⚠️ 修改部分有人工智能参与编写
 
 </div>
 
@@ -40,6 +42,7 @@
 - 新增小尺寸浮窗布局
 - 重写提醒，解决了误报当前课程/下节课程，误报放学的问题
 - 修复了上课时浮窗和主界面同时存在的问题
+- 参照ClassIsland制作自动化功能，还原约80%的功能，配置文件基本兼容
 - ......
 ## 修改部分的软件截图
 
@@ -90,8 +93,12 @@
 
 - [Class-Widgets/Class-Widgets](https://github.com/Class-Widgets/Class-Widgets)
 
-感谢上游维护者与所有贡献者的长期投入。
+感谢上游维护者与所有贡献者的长期投入！
+### 参考项目
 
+- [ClassIsland/ClassIsland](https://github.com/ClassIsland/ClassIsland)
+
+参考了该项目的自动化功能实现，感谢其维护者与所有贡献者的长期投入！
 ### 第三方库和框架
 
 - [PyQt5](https://www.riverbankcomputing.com/static/Docs/PyQt5/)
