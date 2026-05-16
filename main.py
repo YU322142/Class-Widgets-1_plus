@@ -13,6 +13,7 @@ from functools import lru_cache
 from shutil import copy
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple, Union
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 import psutil
 from automation.platform_open import (
@@ -113,6 +114,7 @@ from utils import DarkModeWatcher, TimeManagerFactory, restart, stop, update_tim
 from weather import WeatherReportThread as weatherReportThread
 from weather import weather_manager
 
+from automation.async_tools import schedule_coro
 from automation.bootstrap import AutomationRuntime
 from automation.lifecycle_bus import ApplicationLifetime
 from automation.notification_host import NotificationHost
@@ -3021,7 +3023,7 @@ class DesktopWidget(QWidget):  # 主要小组件
         self.tray_menu.addSeparator()
 
         restart_action = Action(fIcon.SYNC, self.tr('重新启动'), triggered=restart)
-        exit_action = Action(fIcon.CLOSE, self.tr('退出'), triggered=stop)
+        exit_action = Action(fIcon.CLOSE, self.tr('退出'), triggered=lambda: stop_with_automation(0))
 
         self.tray_menu.addAction(restart_action)
         self.tray_menu.addAction(exit_action)
@@ -4475,7 +4477,7 @@ def _open_url_on_main_thread(url: str) -> None:
 
 def _app_quit_on_main_thread() -> None:
     try:
-        utils.stop(0)
+        stop_with_automation(0)
     except Exception as e:
         logger.error(f'退出应用失败: {e}')
 
@@ -4596,6 +4598,73 @@ class TipToastNotificationConsumer:
                 pass
             self.QueuedNotificationCount = max(0, self.QueuedNotificationCount - 1)
 
+
+_automation_stopping_emitted = False
+
+
+def emit_automation_stopping_and_wait(timeout: float = 3.0) -> None:
+    """
+    触发“应用退出时”自动化，并给动作一点时间执行。
+
+    为什么需要这个函数：
+    - 托盘菜单退出原来直接调用 utils.stop()，不会触发 lifecycle_bus.EmitStopping()
+    - 即使触发了，如果马上 app.quit()，自动化动作也可能来不及执行
+    """
+    global automation_runtime, _automation_stopping_emitted
+
+    runtime = automation_runtime
+    if runtime is None:
+        return
+
+    try:
+        bus = getattr(runtime, "lifecycle_bus", None)
+        service = getattr(runtime, "automation_service", None)
+
+        if bus is None:
+            return
+
+        if not _automation_stopping_emitted:
+            _automation_stopping_emitted = True
+            logger.debug("触发自动化 stopping 生命周期事件")
+            bus.EmitStopping()
+        else:
+            logger.debug("自动化 stopping 生命周期事件已触发过，跳过重复触发")
+
+        # 等待由 AppStoppingTrigger 触发的动作执行完成。
+        # 注意：这里只等 AutomationService 自己调度的 action task，不会等待 CronTrigger 之类的常驻任务。
+        if service is not None and hasattr(service, "DrainTasks"):
+            try:
+                future = schedule_coro(service.DrainTasks())
+
+                # schedule_coro 在主线程通常返回 concurrent.futures.Future
+                if hasattr(future, "result"):
+                    future.result(timeout=max(0.1, float(timeout)))
+            except FutureTimeoutError:
+                logger.warning(f"等待自动化退出触发动作超时（{timeout} 秒），继续退出")
+            except Exception as e:
+                logger.debug(f"等待自动化退出触发动作失败: {e}")
+
+        # 让主线程处理一下由自动化动作投递过来的 Qt 信号，例如通知、打开窗口等
+        try:
+            app_ = QApplication.instance()
+            if app_ is not None:
+                app_.processEvents()
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.debug(f"触发自动化 stopping 失败: {e}")
+
+
+def stop_with_automation(status: int = 0) -> None:
+    """
+    项目内统一退出入口：
+    先触发自动化“应用退出时”，再真正退出程序。
+    """
+    try:
+        emit_automation_stopping_and_wait(timeout=3.0)
+    finally:
+        utils.stop(status)
 
 
 def build_automation_runtime() -> AutomationRuntime:
@@ -4764,12 +4833,7 @@ def setup_signal_handlers_optimized() -> None:
 
     def signal_handler(signum, frame):
         logger.debug(f'收到信号 {signal.Signals(signum).name},退出...')
-        try:
-            if automation_runtime:
-                automation_runtime.lifecycle_bus.EmitStopping()
-        except Exception as e:
-            logger.debug(f'触发自动化 stopping 失败: {e}')
-        utils.stop(0)
+        stop_with_automation(0)
 
     signal.signal(signal.SIGTERM, signal_handler)  # taskkill
     signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
@@ -5050,6 +5114,5 @@ if __name__ == '__main__':
     splash_window.close()
 
     status = app.exec()
-
-    utils.stop(status)
+    stop_with_automation(status)
 

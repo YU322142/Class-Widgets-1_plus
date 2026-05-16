@@ -40,19 +40,79 @@ from .ruleset_editor import RulesetEditor
 
 
 TRIGGER_DESCRIPTIONS: dict[str, str] = {
-    "classisland.lifetime.startup": "在应用启动时触发。适合显示启动提示、初始化某些动作。",
-    "classisland.lifetime.stopping": "在应用退出时触发。适合保存状态、发送退出通知。",
-    "classisland.lessons.currentTimeStateChanged": "当当前时间状态发生变化时触发，如上课、课间、放学。",
+    "classisland.lifetime.startup": (
+        "在 Class Widgets 启动并加载自动化运行时后触发一次。\n\n"
+        "适合：显示启动提示、初始化自动化状态、广播一个启动信号。"
+    ),
+    "classisland.lifetime.stopping": (
+        "在 Class Widgets 准备退出时触发一次。\n\n"
+        "适合：保存状态、广播退出信号、执行简单清理动作。\n\n"
+        "注意：退出阶段时间有限，不建议放很长的等待动作，也不建议再触发“退出应用 / 重启应用”。"
+    ),
+    "classisland.lessons.currentTimeStateChanged": (
+        "当当前时间状态发生变化时触发，例如从课间进入上课、从上课进入课间、进入放学状态。\n\n"
+        "如果你只关心具体状态，建议使用“上课时 / 课间休息时 / 放学时”。"
+    ),
     "classisland.lessons.onClass": "进入上课状态时触发。",
-    "classisland.lessons.onBreakingTime": "进入课间休息时触发。",
-    "classisland.lessons.onAfterSchool": "当天课程结束时触发。",
-    "classisland.lessons.preTimePoint": "在指定状态开始前若干秒触发，例如上课前 60 秒。",
-    "classisland.cron": "按照 cron 表达式定时触发。适合周期性任务。",
-    "classisland.signal": "收到应用内信号时触发。适合动作之间联动。",
-    "classisland.uri": "调用指定 URI 时触发。适合外部调用或快捷链接。",
-    "classisland.trayMenu": "从托盘菜单点击时触发。适合手动测试或快捷执行。",
-    "classisland.ruleSet.rulesetChanged": "当规则集状态更新时触发。",
+    "classisland.lessons.onBreakingTime": "进入课间休息状态时触发。",
+    "classisland.lessons.onAfterSchool": "当天课程结束并进入放学状态时触发。",
+    "classisland.lessons.preTimePoint": (
+        "在指定课程状态开始前若干秒触发。\n\n"
+        "例如：\n"
+        "• 上课前 60 秒提醒准备上课\n"
+        "• 课间前 10 秒提前显示下课提示\n"
+        "• 放学前 0 秒执行放学动作\n\n"
+        "支持目标：上课、课间、放学。"
+    ),
+    "classisland.cron": (
+        "按照 Cron 表达式定时触发，适合周期性任务。\n\n"
+        "当前支持 5 段 Cron：\n"
+        "分钟 小时 日期 月份 星期\n\n"
+        "取值范围：\n"
+        "• 分钟：0-59\n"
+        "• 小时：0-23\n"
+        "• 日期：1-31\n"
+        "• 月份：1-12\n"
+        "• 星期：0-7，其中 0 和 7 都表示周日\n\n"
+        "支持写法：\n"
+        "• * 任意值\n"
+        "• */5 每 5 个单位\n"
+        "• 1,2,3 多个值\n"
+        "• 1-5 范围\n"
+        "• 1-10/2 范围内步进\n\n"
+        "常用例子：\n"
+        "• * * * * * 每分钟触发一次\n"
+        "• */5 * * * * 每 5 分钟触发一次\n"
+        "• 0 7 * * * 每天 07:00 触发\n"
+        "• 30 21 * * 1-5 工作日 21:30 触发\n"
+        "• 0 8 1 * * 每月 1 日 08:00 触发\n\n"
+        "注意：Cron 触发器按分钟触发，同一分钟内只会触发一次。"
+    ),
+    "classisland.signal": (
+        "收到应用内信号时触发。\n\n"
+        "通常和“广播信号”动作配合使用。两个地方填写完全相同的信号名即可联动。"
+    ),
+    "classisland.uri": (
+        "调用自动化 URI 路由时触发。\n\n"
+        "它不是“打开网页 URL”，也不是“访问 https 链接”。\n"
+        "它用于让插件、脚本或程序内部代码主动触发某个工作流。\n\n"
+        "用法：\n"
+        "1. 在这里填写 URI 后缀，例如：demo/test\n"
+        "2. 在代码里调用：emit_automation_uri(\"demo/test\")\n"
+        "3. 如果要触发恢复流程，调用：emit_automation_uri(\"demo/test\", revert=True)\n\n"
+        "注意：当前实现是应用内 URI 总线；如果要从浏览器地址栏或系统快捷方式直接触发，"
+        "还需要额外注册系统 URL 协议或实现单实例 IPC 转发。"
+    ),
+    "classisland.trayMenu": (
+        "在系统托盘菜单里添加一个自定义菜单项。\n\n"
+        "点击这个菜单项时触发工作流，适合手动测试、快捷执行、临时开关。"
+    ),
+    "classisland.ruleSet.rulesetChanged": (
+        "当规则集状态更新时触发。\n\n"
+        "适合对前台窗口、天气、课程状态等条件变化做联动。"
+    ),
 }
+
 
 ACTION_DESCRIPTIONS: dict[str, str] = {
     "classisland.showNotification": "显示 CW 风格提醒。注意：主提示与详细内容会同时显示，不是先标题再正文。",
@@ -374,15 +434,48 @@ class GroupedPickerDialog(QDialog):
         splitter.setStretchFactor(1, 5)
 
         self.desc_card = CardFrame()
+        self.desc_card.setMinimumHeight(120)
+        self.desc_card.setMaximumHeight(300)
+
         desc_layout = QVBoxLayout(self.desc_card)
         desc_layout.setContentsMargins(12, 10, 12, 10)
-        desc_layout.setSpacing(4)
+        desc_layout.setSpacing(6)
         desc_layout.addWidget(SectionHeader("说明"))
-        self.desc_label = BodyLabel("请选择一个条目后，这里会显示它的用途。")
+
+        self.desc_scroll = SmoothScrollArea()
+        self.desc_scroll.setWidgetResizable(True)
+        self.desc_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.desc_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.desc_scroll.setMinimumHeight(80)
+        self.desc_scroll.setMaximumHeight(250)
+        self.desc_scroll.setStyleSheet(
+            _scroll_style()
+            + """
+            QWidget#AutomationPickerDescScrollContent {
+                background: transparent;
+            }
+            """
+        )
+
+        self.desc_scroll_content = QWidget()
+        self.desc_scroll_content.setObjectName("AutomationPickerDescScrollContent")
+        self.desc_scroll.setWidget(self.desc_scroll_content)
+
+        desc_scroll_layout = QVBoxLayout(self.desc_scroll_content)
+        desc_scroll_layout.setContentsMargins(0, 0, 8, 0)
+        desc_scroll_layout.setSpacing(0)
+
+        self.desc_label = BodyLabel("请选择一个条目后，这里会显示它的用途、参数说明和示例。")
         self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet("color: #444;")
-        desc_layout.addWidget(self.desc_label)
-        root.addWidget(self.desc_card)
+        self.desc_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.desc_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.desc_label.setStyleSheet("color: #444; background: transparent;")
+
+        desc_scroll_layout.addWidget(self.desc_label)
+        desc_scroll_layout.addStretch(1)
+
+        desc_layout.addWidget(self.desc_scroll, 1)
+        root.addWidget(self.desc_card, 0)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
@@ -405,21 +498,41 @@ class GroupedPickerDialog(QDialog):
         if self.group_list.count() > 0:
             self.group_list.setCurrentRow(0)
 
+    def _set_description_text(self, text: str) -> None:
+        self.desc_label.setText(text)
+        QTimer.singleShot(0, self._scroll_description_to_top)
+
+    def _scroll_description_to_top(self) -> None:
+        try:
+            self.desc_scroll.verticalScrollBar().setValue(0)
+        except Exception:
+            pass
+
     def _on_group_changed(self, row: int) -> None:
         self.item_list.clear()
-        self.desc_label.setText("请选择一个条目后，这里会显示它的用途。")
+        self._set_description_text("请选择一个条目后，这里会显示它的用途、参数说明和示例。")
         self.ok_btn.setEnabled(False)
 
         if row < 0:
             return
 
-        group_name = self.group_list.item(row).text()
+        group_item = self.group_list.item(row)
+        if group_item is None:
+            return
+
+        group_name = group_item.text()
         items = self._groups.get(group_name, [])
 
         for item_id, display_name in items:
             item = QListWidgetItem(display_name)
             item.setData(Qt.UserRole, item_id)
-            item.setToolTip(item_id)
+
+            desc = self._descriptions.get(item_id, "")
+            if desc:
+                item.setToolTip(f"{display_name}\n{item_id}\n\n{desc}")
+            else:
+                item.setToolTip(item_id)
+
             self.item_list.addItem(item)
 
         if self.item_list.count() > 0:
@@ -428,13 +541,18 @@ class GroupedPickerDialog(QDialog):
     def _on_item_changed(self, row: int) -> None:
         item = self.item_list.item(row)
         if item is None:
-            self.desc_label.setText("请选择一个条目后，这里会显示它的用途。")
+            self._set_description_text("请选择一个条目后，这里会显示它的用途、参数说明和示例。")
             self.ok_btn.setEnabled(False)
             return
 
         item_id = item.data(Qt.UserRole)
-        desc = self._descriptions.get(item_id, f"ID: {item_id}")
-        self.desc_label.setText(desc)
+        desc = self._descriptions.get(item_id, "")
+
+        if desc:
+            self._set_description_text(f"{desc}\n\nID：{item_id}")
+        else:
+            self._set_description_text(f"ID：{item_id}")
+
         self.ok_btn.setEnabled(True)
 
     def _on_accept(self) -> None:
@@ -803,7 +921,9 @@ class AutomationSettingsPage(QWidget):
         self.trigger_list.setMinimumHeight(120)
         trigger_layout.addWidget(self.trigger_list)
 
-        self.trigger_tip = CaptionLabel("常见示例：应用启动时、托盘菜单点击时、收到信号时。")
+        self.trigger_tip = CaptionLabel(
+            "常见示例：上课前提醒、Cron 定时执行、托盘菜单手动触发、应用内 URI 调用。"
+        )
         self.trigger_tip.setWordWrap(True)
         self.trigger_tip.setStyleSheet("color: #666;")
         trigger_layout.addWidget(self.trigger_tip)

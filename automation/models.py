@@ -73,7 +73,7 @@ class WeatherNotificationActionSettings:
 
 @dataclass
 class CronTriggerSettings:
-    CronExpression: str = "* * * * *"
+    CronExpression: str = "0 8 * * *"
 
 
 @dataclass

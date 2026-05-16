@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-import asyncio
-import inspect
+import logging
 from enum import IntEnum
 from typing import Any, Callable
+
 from .async_tools import schedule_awaitable
+
+
+LOGGER = logging.getLogger(__name__)
+
 
 class ApplicationLifetime(IntEnum):
     None_ = 0
@@ -27,12 +31,14 @@ class LifecycleBus:
     def __init__(self, phase: ApplicationLifetime = ApplicationLifetime.StartingOnline) -> None:
         self.Phase = phase
         self._stopping_handlers: list[EventHandler] = []
+        self._stopping_emitted: bool = False
 
     def SetPhase(self, phase: ApplicationLifetime) -> None:
-        self.Phase = phase
+        self.Phase = ApplicationLifetime(phase)
 
     def AddStoppingHandler(self, handler: EventHandler) -> None:
-        self._stopping_handlers.append(handler)
+        if handler not in self._stopping_handlers:
+            self._stopping_handlers.append(handler)
 
     def RemoveStoppingHandler(self, handler: EventHandler) -> None:
         if handler in self._stopping_handlers:
@@ -40,6 +46,12 @@ class LifecycleBus:
 
     def EmitStopping(self) -> None:
         self.Phase = ApplicationLifetime.Stopping
+
+        # 防止多条退出路径重复触发。
+        if self._stopping_emitted:
+            return
+
+        self._stopping_emitted = True
         self._emit(self._stopping_handlers)
 
     def _emit(self, handlers: list[EventHandler]) -> None:
@@ -48,5 +60,4 @@ class LifecycleBus:
                 result = handler()
                 schedule_awaitable(result)
             except Exception:
-                pass
-
+                LOGGER.exception("LifecycleBus stopping handler failed")

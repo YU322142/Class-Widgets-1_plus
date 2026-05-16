@@ -278,7 +278,17 @@ class AutomationPropertyEditor(QWidget):
                 "URI 后缀",
                 settings,
                 "UriSuffix",
-                hint="例如填写 demo/run，则可通过自动化 URI 路由触发对应工作流。",
+                hint="例如填写 demo/test，然后通过 emit_automation_uri(\"demo/test\") 触发。",
+            )
+            self._add_note_row(
+                section.form,
+                "调用 URI 触发器的用法：\n"
+                "1. 这里填写一个后缀，例如 demo/test。\n"
+                "2. 普通触发：emit_automation_uri(\"demo/test\")。\n"
+                "3. 触发恢复：emit_automation_uri(\"demo/test\", revert=True)。\n\n"
+                "注意：这里的 URI 是自动化内部路由，不是打开 https:// 链接。\n"
+                "“运行 → URL”是动作，用来打开网页；“调用 URI 时”是触发器，用来让外部逻辑触发工作流。\n"
+                "当前版本如果要从浏览器或系统快捷方式直接调用，还需要额外注册系统 URL 协议或实现单实例 IPC。"
             )
             return
 
@@ -288,7 +298,25 @@ class AutomationPropertyEditor(QWidget):
                 "Cron 表达式",
                 settings,
                 "CronExpression",
-                hint="例如 */5 * * * * 表示每 5 分钟触发一次。",
+                hint="格式：分钟 小时 日期 月份 星期。例如 */5 * * * * 表示每 5 分钟触发一次。",
+            )
+            self._add_note_row(
+                section.form,
+                "Cron 表达式说明：\n"
+                "当前支持 5 段 Cron：分钟 小时 日期 月份 星期。\n\n"
+                "取值范围：\n"
+                "• 分钟：0-59\n"
+                "• 小时：0-23\n"
+                "• 日期：1-31\n"
+                "• 月份：1-12\n"
+                "• 星期：0-7，0 和 7 都表示周日\n\n"
+                "常用例子：\n"
+                "• * * * * *：每分钟触发一次\n"
+                "• */5 * * * *：每 5 分钟触发一次\n"
+                "• 0 7 * * *：每天 07:00 触发\n"
+                "• 30 21 * * 1-5：周一到周五 21:30 触发\n"
+                "• 0 8 1 * *：每月 1 日 08:00 触发\n\n"
+                "支持：*、逗号列表、范围、步进，例如 1,2,3、1-5、*/10、1-10/2。"
             )
             return
 
