@@ -1,6 +1,4 @@
-<div align="right">
-简体中文 | <a href="/docs/readme/README.en_US.md">English</a> | <a href="/docs/readme/README.ja.md">日本語</a>
-</div>
+
 
 <p align="center">
   <img width="16%" align="center" src="img/Logo.png" alt="logo">
