@@ -201,6 +201,7 @@ def stop(status: int = 0) -> None:
     logger.debug(f"程序退出({status})")
     if not app:
         os._exit(status)
+    os._exit(status)  # 强制杀死残留线程，防止 sys.excepthook 刷屏
 
 
 def calculate_size(

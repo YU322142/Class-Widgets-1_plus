@@ -4499,11 +4499,8 @@ class SettingsMenu(FluentWindow):
         te_timeline_list.itemChanged.connect(self.te_upload_item)
 
         te_part_time = self.teInterface.findChild(TimeEdit, 'part_time')  # 节次时间
-        te_part_time.timeChanged.connect(
-            lambda: self.show_tip_flyout(
-                self.tr('重要提示'), self.tr('请使用 24 小时制'), te_part_time
-            )
-        )
+        te_part_time.setDisplayFormat("HH:mm")
+        te_part_time.setToolTip(self.tr("请输入 24 小时制时间"))
 
         te_save_button = self.findChild(PrimaryPushButton, 'save')  # 保存
         te_save_button.clicked.connect(self.te_save_item)

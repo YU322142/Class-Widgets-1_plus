@@ -176,37 +176,63 @@ was_floating_mode = False  # 浮窗状态
 def global_exceptHook(exc_type: type, exc_value: Exception, exc_tb: Any) -> None:
     if config_center.read_conf('Other', 'safe_mode') == '1':
         return
-    error_details = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+
+    try:
+        error_details = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    except Exception:
+        error_details = str(exc_value)
+
     if error_details in ignore_errors:
         return
+
     global last_error_time, error_dialog, error_cooldown
     current_time = dt.datetime.now()
     if current_time - last_error_time > error_cooldown:
         last_error_time = current_time
-        # 获取异常抛出位置
-        tb_last = exc_tb
-        while tb_last.tb_next:  # 找到最后一帧
-            tb_last = tb_last.tb_next
-        frame = tb_last.tb_frame
-        file_name = os.path.basename(frame.f_code.co_filename)
-        line_no = tb_last.tb_lineno
-        func_name = frame.f_code.co_name
-        process = psutil.Process()
-        memory_info = process.memory_info()
-        thread_count = process.num_threads()
+
+        file_name, line_no, func_name = "Unknown", 0, "Unknown"
+        if exc_tb is not None:
+            try:
+                tb_last = exc_tb
+                while tb_last.tb_next:  # 找到最后一帧
+                    tb_last = tb_last.tb_next
+                frame = tb_last.tb_frame
+                file_name = os.path.basename(frame.f_code.co_filename)
+                line_no = tb_last.tb_lineno
+                func_name = frame.f_code.co_name
+            except Exception:
+                pass
+
+        try:
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            thread_count = process.num_threads()
+            rss_mb = memory_info.rss / 1024 / 1024
+        except Exception:
+            rss_mb = 0.0
+            thread_count = 0
+
         log_msg = f"""发生全局异常:
 ├─异常类型: {exc_type.__name__} {exc_type}
 ├─异常信息: {exc_value}
 ├─发生位置: {file_name}:{line_no} in {func_name}
-├─运行状态: 内存使用 {memory_info.rss / 1024 / 1024:.1f}MB 线程数: {thread_count}
+├─运行状态: 内存使用 {rss_mb:.1f}MB 线程数: {thread_count}
 └─详细堆栈信息:"""
-        tip_msg = f"""运行状态: 内存使用 {memory_info.rss / 1024 / 1024:.1f}MB 线程数: {thread_count}
+        tip_msg = f"""运行状态: 内存使用 {rss_mb:.1f}MB 线程数: {thread_count}
 └─异常类型: {exc_type.__name__} {exc_type}"""
-        logger.opt(exception=(exc_type, exc_value, exc_tb), depth=0).error(log_msg)
-        logger.complete()
+
+        try:
+            logger.opt(exception=(exc_type, exc_value, exc_tb), depth=0).error(log_msg)
+            logger.complete()
+        except Exception:
+            pass
+
         if not error_dialog:
-            w = ErrorDialog(f'{tip_msg}\n{error_details}')
-            w.exec()
+            try:
+                w = ErrorDialog(f'{tip_msg}\n{error_details}')
+                w.exec()
+            except Exception:
+                pass
 
 
 sys.excepthook = global_exceptHook  # 设置全局异常捕获
@@ -4834,6 +4860,7 @@ def setup_signal_handlers_optimized() -> None:
     def signal_handler(signum, frame):
         logger.debug(f'收到信号 {signal.Signals(signum).name},退出...')
         stop_with_automation(0)
+        os._exit(0)
 
     signal.signal(signal.SIGTERM, signal_handler)  # taskkill
     signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
@@ -5113,6 +5140,13 @@ if __name__ == '__main__':
 
     splash_window.close()
 
+
+
     status = app.exec()
+
+    import sys
+    sys.excepthook = sys.__excepthook__  # 退出时恢复 Python 默认的错误处理，防止崩溃死循环
     stop_with_automation(status)
+
+
 

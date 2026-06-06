@@ -84,6 +84,23 @@ class AutomationUiController:
     # =========================================================
     # Config
     # =========================================================
+    def is_automation_enabled(self) -> bool:
+        """获取当前配置下全局是否启用了自动化"""
+        if getattr(self, "runtime", None) is not None:
+            return getattr(self.runtime.context.settings, "IsAutomationEnabled", True)
+        return True
+
+    def set_automation_enabled(self, enabled: bool) -> None:
+        """设置全局自动化启用状态，仅修改内存副本，需调用 save_current 才会落盘"""
+        if getattr(self, "runtime", None) is not None:
+            self.runtime.context.settings.IsAutomationEnabled = enabled
+
+    def apply_current(self) -> bool:
+        """将当前编辑态工作流应用到真实运行时中"""
+        if getattr(self, "runtime", None) is not None:
+            if hasattr(self.runtime, "apply_to_runtime"):
+                return self.runtime.apply_to_runtime()
+        return False
 
     def get_current_config_name(self) -> str:
         settings = self.runtime.context.settings

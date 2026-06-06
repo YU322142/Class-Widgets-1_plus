@@ -256,7 +256,17 @@ def _dataclass_from_dict(cls: type, raw: dict[str, Any]) -> Any:
         annotation = type_hints.get(f.name, Any)
         kwargs[f.name] = _coerce_value(key_value, annotation)
 
-    return cls(**kwargs)
+    inst = cls(**kwargs)
+
+    # 【跨应用兼容性补丁】收集未知字典键（避免擦除原版新增字段或第三方插件配置）
+    known_keys = {f.name for f in fields(cls)}
+    known_keys_camel = {f.name[0].lower() + f.name[1:] for f in fields(cls)}
+    extra = {k: v for k, v in raw.items() if k not in known_keys and k not in known_keys_camel and not k.startswith("_")}
+    if extra:
+        setattr(inst, "_json_extra_fields", extra)
+
+    return inst
+
 
 
 def _coerce_value(value: Any, annotation: Any) -> Any:
@@ -347,7 +357,19 @@ def _to_jsonable(obj: Any) -> Any:
             if isinstance(obj, ActionSet) and f.name == "Status":
                 value = collapse_action_set_status(value)
 
+            # (可选) 和原版保持一致：如果 Settings 为 None，干脆不写入
+            if f.name == "Settings" and value is None:
+                continue
+
             result[f.name] = _to_jsonable(value)
+
+        # 【跨应用兼容性补丁】将未知的原生字段原样写回 JSON
+        extra = getattr(obj, "_json_extra_fields", None)
+        if isinstance(extra, dict):
+            for k, v in extra.items():
+                if k not in result:
+                    result[k] = _to_jsonable(v)
+
         return result
 
     if isinstance(obj, list):
@@ -357,6 +379,7 @@ def _to_jsonable(obj: Any) -> Any:
         return {k: _to_jsonable(v) for k, v in obj.items()}
 
     return obj
+
 
 # =========================================
 # Helpers
@@ -372,8 +395,12 @@ _MISSING = _Missing()
 def _pick(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     for key in keys:
         if key in data:
-            return data[key]
+            val = data[key]
+            # 如果值为 None (即 JSON 里的 null)，应该继续寻找或 fallback 到默认安全值（如 []）
+            if val is not None:
+                return val
     return default
+
 
 
 def _parse_action_set_status(value: Any) -> ActionSetStatus:

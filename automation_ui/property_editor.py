@@ -25,6 +25,8 @@ from qfluentwidgets import (
     PushButton,
     SpinBox,
     StrongBodyLabel,
+    qconfig,
+    isDarkTheme,
 )
 
 from automation.compat import RULE_SETTINGS_TYPES
@@ -90,7 +92,6 @@ class FieldWidget(QWidget):
         if hint:
             self.hint_label = CaptionLabel(hint)
             self.hint_label.setWordWrap(True)
-            self.hint_label.setStyleSheet("color: #666;")
             layout.addWidget(self.hint_label)
 
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -100,15 +101,9 @@ class EditorSection(QFrame):
     def __init__(self, title: str, desc: str = "", parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("AutomationEditorSection")
-        self.setStyleSheet(
-            """
-            QFrame#AutomationEditorSection {
-                background: rgba(255, 255, 255, 0.72);
-                border: 1px solid rgba(0, 0, 0, 0.035);
-                border-radius: 10px;
-            }
-            """
-        )
+        self._update_style()
+        qconfig.themeChanged.connect(self._update_style)
+
         self.layout_root = QVBoxLayout(self)
         self.layout_root.setContentsMargins(12, 12, 12, 12)
         self.layout_root.setSpacing(10)
@@ -120,7 +115,6 @@ class EditorSection(QFrame):
         if desc:
             self.desc_label = CaptionLabel(desc)
             self.desc_label.setWordWrap(True)
-            self.desc_label.setStyleSheet("color: #666;")
             self.layout_root.addWidget(self.desc_label)
 
         self.form = QFormLayout()
@@ -130,6 +124,28 @@ class EditorSection(QFrame):
         self.form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.layout_root.addLayout(self.form)
+
+    def _update_style(self):
+        if isDarkTheme():
+            self.setStyleSheet(
+                """
+                QFrame#AutomationEditorSection {
+                    background: rgba(255, 255, 255, 0.03);
+                    border: 1px solid rgba(255, 255, 255, 0.05);
+                    border-radius: 10px;
+                }
+                """
+            )
+        else:
+            self.setStyleSheet(
+                """
+                QFrame#AutomationEditorSection {
+                    background: rgba(255, 255, 255, 0.72);
+                    border: 1px solid rgba(0, 0, 0, 0.035);
+                    border-radius: 10px;
+                }
+                """
+            )
 
 
 class AutomationPropertyEditor(QWidget):
@@ -526,519 +542,436 @@ class AutomationPropertyEditor(QWidget):
             "规则集逻辑",
             ruleset,
             "Mode",
-            hint="选择“任意组满足即可（OR）”或“所有组都要满足（AND）”。",
+            hint="“且”表示所有启用的规则组都满足时才算满足；“或”表示任一满足即可。",
         )
         self._add_checkbox(
             section.form,
             "反转结果",
             ruleset,
             "IsReversed",
-            hint="勾选后，整个规则集的判断结果会取反。",
+            hint="如果勾选，满足时算不满足，不满足时算满足。",
         )
-        self._add_note_row(section.form, "提示：规则组和单条规则的详细设置，在右侧选中对应对象后会显示在这里。")
 
     def _build_rule_group_editor(self, group: RuleGroup) -> None:
-        section = EditorSection("规则组", "规则组用于把多条规则按 AND / OR 方式组合。")
+        section = EditorSection("规则组", "一组规则的集合。")
         self.content_layout.addWidget(section)
 
         self._add_checkbox(
             section.form,
-            "启用当前规则组",
+            "启用",
             group,
             "IsEnabled",
-            hint="关闭后，这个规则组会被保留，但不会参与判断。",
+            hint="取消勾选后，计算条件时会忽略此规则组。",
         )
         self._add_ruleset_mode_combo(
             section.form,
-            "组逻辑",
+            "组内逻辑",
             group,
             "Mode",
-            hint="选择“任意规则满足即可（OR）”或“所有规则都要满足（AND）”。",
+            hint="“且”表示组内所有规则都满足时该组才算满足；“或”表示任一满足即可。",
         )
         self._add_checkbox(
             section.form,
-            "反转当前规则组结果",
+            "反转结果",
             group,
             "IsReversed",
-            hint="勾选后，这个规则组的结果会被取反。",
+            hint="如果勾选，该组结果会被反转。",
         )
-        self._add_note_row(section.form, f"当前组内规则数：{len(getattr(group, 'Rules', []) or [])}")
 
     def _build_rule_editor(self, rule: Rule) -> None:
-        info = get_rule_info(rule.Id) if getattr(rule, "Id", "") else None
-        section = EditorSection("规则", "当前选中规则的详细属性。")
+        info = get_rule_info(rule.Id)
+        section = EditorSection("规则", "具体的条件判断逻辑。")
         self.content_layout.addWidget(section)
 
-        section.form.addRow(self._make_label("类型"), self._make_value_label(info.Name if info else (rule.Id or "未选择规则")))
-        section.form.addRow(self._make_label("ID"), self._make_subtle_value_label(rule.Id or "(空)"))
+        section.form.addRow(self._make_label("类型"), self._make_value_label(info.Name if info else rule.Id))
+        section.form.addRow(self._make_label("ID"), self._make_subtle_value_label(rule.Id))
 
         self._add_checkbox(
             section.form,
-            "反转当前规则结果",
+            "反转结果",
             rule,
             "IsReversed",
-            hint="勾选后，这条规则的判断结果会取反。",
+            hint="如果勾选，此条规则的结果会被反转。",
         )
-
-        if not rule.Id:
-            self._add_note_row(section.form, "当前规则尚未指定类型。请在右侧规则列表中点击“更换规则类型”。")
-            return
-
-        if rule.Settings is None:
-            settings_type = RULE_SETTINGS_TYPES.get(rule.Id)
-            if settings_type is not None:
-                rule.Settings = settings_type()
 
         settings = rule.Settings
         if settings is None:
-            self._add_note_row(section.form, "此规则没有可编辑的设置项。")
-            return
+            default_cls = RULE_SETTINGS_TYPES.get(rule.Id)
+            if default_cls is not None:
+                settings = default_cls()
+                rule.Settings = settings
+            else:
+                self._add_note_row(section.form, "此规则没有设置项。")
+                return
 
         if isinstance(settings, StringMatchingSettings):
             self._add_line_edit(
                 section.form,
-                "文本",
+                "匹配文本",
                 settings,
                 "Text",
-                hint="填写要匹配的文本。",
             )
             self._add_checkbox(
                 section.form,
-                "使用正则",
+                "使用正则表达式",
                 settings,
                 "UseRegex",
-                hint="勾选后，文本将按正则表达式处理。",
             )
             return
 
-        if isinstance(settings, CurrentSubjectRuleSettings):
-            self._add_subject_combo(
-                section.form,
-                "科目",
-                settings,
-                "SubjectId",
-                hint="CW 当前按“科目显示名称”匹配，不是 ClassIsland 的 SubjectId / 科目对象语义。",
+        if isinstance(settings, TimeStateRuleSettings):
+            self._add_time_state_combo(section.form, "目标状态", settings, "State")
+            return
+
+        if isinstance(settings, WindowStatusRuleSettings):
+            combo = ComboBox()
+            # 严格对齐 ClassIsland 原版顺序：0=正常, 1=最大化, 2=最小化, 3=全屏
+            combo_add_item(combo, "正常 / 窗口化 (Normal)", 0)
+            combo_add_item(combo, "最大化 (Maximized)", 1)
+            combo_add_item(combo, "最小化 (Minimized)", 2)
+            combo_add_item(combo, "全屏 (FullScreen)", 3)
+
+            current = int(getattr(settings, "State", 0))
+            idx = combo.findData(current)
+            combo.setCurrentIndex(max(0, idx))
+
+            def _on_changed(_):
+                settings.State = int(combo_current_data(combo))
+                self.changed.emit()
+
+            combo.currentIndexChanged.connect(_on_changed)
+            section.form.addRow(
+                self._make_label("窗口状态"),
+                FieldWidget(combo, "选择要求前台窗口处于哪种状态")
             )
             return
 
         if isinstance(settings, CurrentWeatherRuleSettings):
-            self._add_current_weather_combo(
+            combo = EditableComboBox()
+            WEATHER_TYPE = {
+                "0": "晴", "1": "多云", "2": "阴", "3": "阵雨", "4": "雷阵雨",
+                "5": "雷阵雨伴有冰雹", "6": "雨夹雪", "7": "小雨", "8": "中雨",
+                "9": "大雨", "10": "暴雨", "11": "大暴雨", "12": "特大暴雨",
+                "13": "阵雪", "14": "小雪", "15": "中雪", "16": "大雪", "17": "暴雪",
+                "18": "雾", "19": "冻雨", "20": "沙尘暴", "21": "小到中雨",
+                "22": "中到大雨", "23": "大到暴雨", "24": "暴雨到大暴雨",
+                "25": "大暴雨到特大暴雨", "26": "小到中雪", "27": "中到大雪",
+                "28": "大到暴雪", "29": "浮尘", "30": "扬沙", "31": "强沙尘暴",
+                "53": "霾", "99": "无",
+            }
+            for code, name in WEATHER_TYPE.items():
+                combo_add_item(combo, f"{name} ({code})", str(code))
+            # 修复点 1：读取时读 WeatherId
+            current = str(getattr(settings, "WeatherId", ""))
+            idx = combo.findData(current)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            else:
+                combo.setText(current)
+
+            def _on_changed(_):
+                data = combo_current_data(combo)
+                val = str(data) if data is not None else combo.text().strip()
+                # 修复点 2：写入时写 WeatherId
+                try:
+                    settings.WeatherId = int(val)
+                except ValueError:
+                    settings.WeatherId = val
+                self.changed.emit()
+
+            combo.currentIndexChanged.connect(_on_changed)
+
+            def _on_text_edited(t: str):
+                val = t.strip()
+                # 修复点 3：写入时写 WeatherId
+                try:
+                    settings.WeatherId = int(val)
+                except ValueError:
+                    settings.WeatherId = val
+                self.changed.emit()
+
+            combo.textChanged.connect(_on_text_edited)
+            section.form.addRow(self._make_label("匹配天气"), FieldWidget(combo, "可以选择预设，或直接输入天气代码。"))
+            return
+
+        if isinstance(settings, SunRiseSetRuleSettings):
+            combo = ComboBox()
+            combo_add_item(combo, "日出后 / 日落前（白天）", False)
+            combo_add_item(combo, "日落后 / 日出前（夜间）", True)
+
+            current = bool(getattr(settings, "IsSunset", False))
+            idx = combo.findData(current)
+            combo.setCurrentIndex(max(0, idx))
+
+            def _on_changed(_):
+                settings.IsSunset = bool(combo_current_data(combo))
+                self.changed.emit()
+
+            combo.currentIndexChanged.connect(_on_changed)
+
+            section.form.addRow(
+                self._make_label("目标状态"),
+                FieldWidget(combo, "选择当前时间应处于白天还是夜间。")
+            )
+
+            self._add_double_spin(
                 section.form,
-                "天气",
+                "偏移时长 (分钟)",
                 settings,
-                "WeatherId",
-                hint="当前实现按精确天气代码匹配。",
+                "TimeMinutes",
+                -9999,
+                9999,
+                1,
+                hint="例如填入 60，表示日出/日落后 60 分钟开始判定；负数表示提前。",
             )
             return
 
         if isinstance(settings, RainTimeRuleSettings):
             self._add_double_spin(
                 section.form,
-                "分钟",
+                "时长阈值 (分钟)",
                 settings,
                 "RainTimeMinutes",
                 0,
-                9999,
+                999999,
                 1,
-                hint="用于判断距离下雨开始/结束还有多少分钟。",
+                hint="下雨开始或结束的时间在这个分钟数以内时视为满足条件。",
             )
             self._add_checkbox(
                 section.form,
-                "判断剩余时间",
+                "判断降雨结束剩余时间",
                 settings,
                 "IsRemainingTime",
-                hint="勾选后，表示判断“距离结束还剩多少分钟”；否则判断“距离开始还有多少分钟”。",
+                hint="不勾选：判断距离降雨开始；勾选：判断距离降雨结束。",
             )
             return
 
-        if isinstance(settings, SunRiseSetRuleSettings):
-            self._add_double_spin(
+        if isinstance(settings, CurrentSubjectRuleSettings):
+            self._add_line_edit(
                 section.form,
-                "分钟",
+                "科目名称",
                 settings,
-                "TimeMinutes",
-                0,
-                9999,
-                1,
-                hint="相对于日出或日落的分钟偏移。",
-            )
-            self._add_checkbox(
-                section.form,
-                "是否判断日落后",
-                settings,
-                "IsSunset",
-                hint="勾选后表示按“日落”判断；否则按“日出”判断。",
+                "SubjectId",
+                hint="输入要匹配的科目名称，例如填写“数学”。",
             )
             return
 
-        if isinstance(settings, TimeStateRuleSettings):
-            self._add_time_state_combo(
-                section.form,
-                "时间状态",
-                settings,
-                "State",
-                hint="根据当前课程时间状态进行判断。",
-            )
-            return
-
-        if isinstance(settings, WindowStatusRuleSettings):
-            self._add_window_state_combo(
-                section.form,
-                "窗口状态",
-                settings,
-                "State",
-                hint="匹配前台窗口当前状态。",
-            )
-            return
-
-        self._add_note_row(section.form, "该规则的设置编辑器尚未实现。")
+        self._add_note_row(section.form, "该规则设置编辑器尚未实现。")
 
     # =========================================================
-    # RunAction 专用编辑器
+    # Run Action & Settings Action
     # =========================================================
 
     def _build_run_action_editor(self, section: EditorSection, settings: RunActionSettings) -> None:
         type_combo = ComboBox()
-        type_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        combo_add_item(type_combo, "应用程序", RunActionRunType.Application)
-        combo_add_item(type_combo, "命令", RunActionRunType.Command)
-        combo_add_item(type_combo, "文件", RunActionRunType.File)
-        combo_add_item(type_combo, "文件夹", RunActionRunType.Folder)
-        combo_add_item(type_combo, "URL", RunActionRunType.Url)
+        combo_add_item(type_combo, "应用 (Application)", RunActionRunType.Application)
+        combo_add_item(type_combo, "命令 (Command)", RunActionRunType.Command)
+        combo_add_item(type_combo, "文件 (File)", RunActionRunType.File)
+        combo_add_item(type_combo, "文件夹 (Folder)", RunActionRunType.Folder)
+        combo_add_item(type_combo, "网页 URL (Url)", RunActionRunType.Url)
 
-        current_type = settings.RunType
+        current_type = getattr(settings, "RunType", RunActionRunType.Application)
         idx = type_combo.findData(current_type)
         type_combo.setCurrentIndex(max(0, idx))
-
-        section.form.addRow(
-            self._make_label("运行类型"),
-            FieldWidget(type_combo, "选择要运行的对象类型。"),
-        )
-
-        value_row = QWidget()
-        value_row_layout = QHBoxLayout(value_row)
-        value_row_layout.setContentsMargins(0, 0, 0, 0)
-        value_row_layout.setSpacing(6)
-
-        value_edit = LineEdit()
-        value_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        value_edit.setText("" if getattr(settings, "Value", None) is None else str(settings.Value))
-        value_row_layout.addWidget(value_edit)
-
-        browse_btn = PushButton("浏览…")
-        browse_btn.setFixedWidth(88)
-        browse_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        value_row_layout.addWidget(browse_btn)
-
-        value_hint_label = CaptionLabel("")
-        value_hint_label.setWordWrap(True)
-        value_hint_label.setStyleSheet("color: #666;")
 
         value_wrapper = QWidget()
         value_wrapper_layout = QVBoxLayout(value_wrapper)
         value_wrapper_layout.setContentsMargins(0, 0, 0, 0)
         value_wrapper_layout.setSpacing(4)
+
+        value_row = QWidget()
+        value_row_layout = QHBoxLayout(value_row)
+        value_row_layout.setContentsMargins(0, 0, 0, 0)
+        value_row_layout.setSpacing(8)
+
+        value_edit = LineEdit()
+        value_edit.setText(str(getattr(settings, "Value", "")))
+        value_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        value_row_layout.addWidget(value_edit)
+
+        browse_btn = PushButton("浏览...")
+        browse_btn.hide()
+        value_row_layout.addWidget(browse_btn)
+
+        value_hint_label = CaptionLabel("")
+        value_hint_label.setWordWrap(True)
+
         value_wrapper_layout.addWidget(value_row)
         value_wrapper_layout.addWidget(value_hint_label)
-        value_wrapper.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
 
-        section.form.addRow(self._make_label("值"), value_wrapper)
-
-        args_edit = LineEdit()
-        args_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        args_edit.setText("" if getattr(settings, "Args", None) is None else str(settings.Args))
-        args_widget = FieldWidget(args_edit, "（可选）应用程序启动参数")
-        args_label = self._make_label("参数")
-        section.form.addRow(args_label, args_widget)
-
-        def _update_ui() -> None:
-            rt = combo_current_data(type_combo)
-            rt_val = rt.value if hasattr(rt, "value") else str(rt)
-
-            if rt_val == "Application":
-                value_edit.setPlaceholderText("应用程序路径")
-                value_hint_label.setText("填写可执行文件路径，或点击“浏览…”选择。")
-                browse_btn.setVisible(True)
-                args_label.setVisible(True)
-                args_widget.setVisible(True)
-            elif rt_val == "File":
-                value_edit.setPlaceholderText("文件路径")
-                value_hint_label.setText("填写文件路径，或点击“浏览…”选择。系统会用默认程序打开。")
-                browse_btn.setVisible(True)
-                args_label.setVisible(False)
-                args_widget.setVisible(False)
-            elif rt_val == "Folder":
-                value_edit.setPlaceholderText("文件夹路径")
-                value_hint_label.setText("填写文件夹路径，或点击“浏览…”选择。系统会用文件管理器打开。")
-                browse_btn.setVisible(True)
-                args_label.setVisible(False)
-                args_widget.setVisible(False)
-            elif rt_val == "Url":
-                value_edit.setPlaceholderText("https://example.com")
-                value_hint_label.setText("填写网页地址。如果不包含协议前缀，会自动补全为 https://。")
-                browse_btn.setVisible(False)
-                args_label.setVisible(False)
-                args_widget.setVisible(False)
-            elif rt_val == "Command":
-                value_edit.setPlaceholderText("Windows 下为 cmd 命令，Linux/macOS 下为 bash 命令")
-                value_hint_label.setText("命令类型请直接在“值”中填写完整命令文本。")
-                browse_btn.setVisible(False)
-                args_label.setVisible(False)
-                args_widget.setVisible(False)
+        def _update_ui(rt: RunActionRunType) -> None:
+            if rt in (RunActionRunType.Application, RunActionRunType.File):
+                browse_btn.show()
             else:
-                value_edit.setPlaceholderText("")
-                value_hint_label.setText("")
-                browse_btn.setVisible(False)
-                args_label.setVisible(False)
-                args_widget.setVisible(False)
+                browse_btn.hide()
 
-        def _on_browse() -> None:
-            rt = combo_current_data(type_combo)
-            rt_val = rt.value if hasattr(rt, "value") else str(rt)
+            hints = {
+                RunActionRunType.Application: "填写可执行文件的路径，例如 C:\\Windows\\notepad.exe",
+                RunActionRunType.Command: "填写要执行的 CMD/Shell 命令。",
+                RunActionRunType.File: "填写要打开的文件路径。",
+                RunActionRunType.Folder: "填写要用资源管理器打开的文件夹路径。",
+                RunActionRunType.Url: "填写网页链接，例如 https://www.baidu.com",
+            }
+            value_hint_label.setText(hints.get(rt, ""))
 
-            if rt_val == "Folder":
-                path = QFileDialog.getExistingDirectory(
-                    self, "选择文件夹", value_edit.text()
-                )
-                if path:
-                    value_edit.setText(path)
-
-            elif rt_val == "Application":
-                if sys.platform == "win32":
-                    filter_str = "应用程序 (*.exe *.bat *.cmd *.com *.lnk);;所有文件 (*)"
-                elif sys.platform == "darwin":
-                    filter_str = "应用程序 (*.app);;所有文件 (*)"
-                else:
-                    filter_str = "所有文件 (*)"
-                path, _ = QFileDialog.getOpenFileName(
-                    self, "选择应用程序", value_edit.text(), filter_str
-                )
-                if path:
-                    value_edit.setText(path)
-
-            else:
-                path, _ = QFileDialog.getOpenFileName(
-                    self, "选择文件", value_edit.text(), "所有文件 (*)"
-                )
-                if path:
-                    value_edit.setText(path)
+        _update_ui(current_type)
 
         def _on_type_changed(_):
-            settings.RunType = combo_current_data(type_combo)
-            _update_ui()
+            rt = RunActionRunType(combo_current_data(type_combo))
+            settings.RunType = rt
+            _update_ui(rt)
             self.changed.emit()
 
-        def _on_value_changed(text: str):
-            settings.Value = text
+        type_combo.currentIndexChanged.connect(_on_type_changed)
+
+        def _on_value_changed(txt: str):
+            settings.Value = txt
             self.changed.emit()
 
-        def _on_args_changed(text: str):
-            settings.Args = text
-            self.changed.emit()
+        value_edit.textChanged.connect(_on_value_changed)
+
+        def _on_browse():
+            rt = RunActionRunType(combo_current_data(type_combo))
+            if rt == RunActionRunType.Application:
+                path, _ = QFileDialog.getOpenFileName(self, "选择程序", "",
+                                                      "可执行文件 (*.exe *.bat *.cmd);;所有文件 (*.*)")
+            else:
+                path, _ = QFileDialog.getOpenFileName(self, "选择文件", "", "所有文件 (*.*)")
+            if path:
+                value_edit.setText(path)
 
         browse_btn.clicked.connect(_on_browse)
-        type_combo.currentIndexChanged.connect(_on_type_changed)
-        value_edit.textChanged.connect(_on_value_changed)
-        args_edit.textChanged.connect(_on_args_changed)
 
-        _update_ui()
+        section.form.addRow(self._make_label("运行类型"), type_combo)
+        section.form.addRow(self._make_label("运行目标"), value_wrapper)
 
-    # =========================================================
-    # ModifyAppSettingsAction 专用编辑器
-    # =========================================================
+        self._add_line_edit(
+            section.form,
+            "命令行参数",
+            settings,
+            "Args",
+            hint="如果不需要传参数，请留空。",
+        )
 
-    def _build_modify_app_settings_editor(
-        self,
-        section: EditorSection,
-        settings: ModifyAppSettingsActionSettings,
-    ) -> None:
-        SETTING_CONFIG = "CurrentAutomationConfig"
-        SETTING_ENABLED = "IsAutomationEnabled"
-        SETTING_CUSTOM = "__custom__"
+    def _build_modify_app_settings_editor(self, section: EditorSection,
+                                          settings: ModifyAppSettingsActionSettings) -> None:
+        combo = EditableComboBox()
+        combo_add_item(combo, "是否启用自动化 [IsAutomationEnabled]", "IsAutomationEnabled")
+        combo_add_item(combo, "当前配置文件名 [CurrentAutomationConfig]", "CurrentAutomationConfig")
 
-        name_combo = ComboBox()
-        name_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        combo_add_item(name_combo, "当前自动化配置", SETTING_CONFIG)
-        combo_add_item(name_combo, "自动化总开关", SETTING_ENABLED)
-        combo_add_item(name_combo, "自定义字段（高级）", SETTING_CUSTOM)
+        current_name = str(getattr(settings, "Name", ""))
+        idx = combo.findData(current_name)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        elif current_name:
+            combo.setText(current_name)
 
-        current_name = str(getattr(settings, "Name", "") or "").strip()
-        if current_name == SETTING_CONFIG:
-            current_mode = SETTING_CONFIG
-        elif current_name == SETTING_ENABLED:
-            current_mode = SETTING_ENABLED
-        else:
-            current_mode = SETTING_CUSTOM
+        def _on_name_changed():
+            data = combo_current_data(combo)
+            if data is not None:
+                settings.Name = str(data)
+            else:
+                settings.Name = combo.text().strip()
+            self.changed.emit()
 
-        idx = name_combo.findData(current_mode)
-        name_combo.setCurrentIndex(max(0, idx))
+        combo.currentIndexChanged.connect(_on_name_changed)
+        combo.textChanged.connect(lambda _: _on_name_changed())
 
         section.form.addRow(
-            self._make_label("设置名"),
-            FieldWidget(
-                name_combo,
-                "当前 CW 自动化 backend 只安全保证少量 automation 自身设置可修改；这不是 CI 那种完整“全应用设置编辑器”。",
-            ),
+            self._make_label("设置项名称"),
+            FieldWidget(combo, "选择或输入要修改的设置项对应的 JSON 字段名。"),
         )
 
-        custom_name_edit = LineEdit()
-        custom_name_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        custom_name_edit.setText("" if current_mode != SETTING_CUSTOM else current_name)
-        custom_name_widget = FieldWidget(
-            custom_name_edit,
-            "高级用法：仅当运行时 settings 对象确实存在这个属性名时才会生效。",
-        )
-        custom_name_label = self._make_label("自定义字段")
-        section.form.addRow(custom_name_label, custom_name_widget)
-
-        value_container = QWidget()
-        value_layout = QVBoxLayout(value_container)
+        value_layout = QVBoxLayout()
         value_layout.setContentsMargins(0, 0, 0, 0)
         value_layout.setSpacing(4)
-
-        config_value_combo = EditableComboBox()
-        config_value_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-        bool_value_box = CheckBox("启用")
-        bool_value_box.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
 
         raw_value_edit = LineEdit()
         raw_value_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         value_hint_label = CaptionLabel("")
         value_hint_label.setWordWrap(True)
-        value_hint_label.setStyleSheet("color: #666;")
+
+        config_value_combo = ComboBox()
+        config_value_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        bool_value_box = CheckBox("设置值为 True")
 
         value_layout.addWidget(config_value_combo)
         value_layout.addWidget(bool_value_box)
         value_layout.addWidget(raw_value_edit)
         value_layout.addWidget(value_hint_label)
 
-        section.form.addRow(self._make_label("值"), value_container)
+        def _update_value_ui():
+            name = getattr(settings, "Name", "")
+            val = getattr(settings, "Value", None)
 
-        def _as_bool(value: Any) -> bool:
-            if isinstance(value, bool):
-                return value
-            if isinstance(value, (int, float)):
-                return bool(value)
-            if isinstance(value, str):
-                return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-            return bool(value)
+            config_value_combo.hide()
+            bool_value_box.hide()
+            raw_value_edit.hide()
 
-        def _load_automation_config_names() -> list[str]:
-            try:
-                import conf as conf_module
-                names = list(conf_module.list_automation_configs())
-            except Exception:
-                names = []
-            if not names:
-                names = ["Default"]
-            return names
-
-        def _refresh_config_combo_items(current_value: str) -> None:
-            names = _load_automation_config_names()
-            if current_value and current_value not in names:
-                names.append(current_value)
-
-            try:
-                config_value_combo.clear()
-            except Exception:
-                pass
-
-            try:
-                config_value_combo.addItems(names)
-            except Exception:
-                for name in names:
-                    try:
-                        config_value_combo.addItem(name)
-                    except Exception:
-                        pass
-
-            try:
-                config_value_combo.setCurrentText(current_value)
-            except Exception:
-                pass
-
-        def _current_name_mode() -> str:
-            mode = combo_current_data(name_combo)
-            return str(mode or "")
-
-        def _update_name_and_value_ui() -> None:
-            mode = _current_name_mode()
-
-            custom_name_label.setVisible(mode == SETTING_CUSTOM)
-            custom_name_widget.setVisible(mode == SETTING_CUSTOM)
-
-            config_value_combo.setVisible(False)
-            bool_value_box.setVisible(False)
-            raw_value_edit.setVisible(False)
-
-            if mode == SETTING_CONFIG:
-                settings.Name = SETTING_CONFIG
-                current_value = "" if settings.Value is None else str(settings.Value)
-                _refresh_config_combo_items(current_value)
-                config_value_combo.setVisible(True)
-                value_hint_label.setText("选择或输入要切换到的自动化配置名称。")
-                if settings.Value in (None, ""):
-                    try:
-                        settings.Value = config_value_combo.currentText().strip() or "Default"
-                    except Exception:
-                        settings.Value = "Default"
-
-            elif mode == SETTING_ENABLED:
-                settings.Name = SETTING_ENABLED
+            if name == "IsAutomationEnabled":
+                bool_value_box.show()
                 bool_value_box.blockSignals(True)
-                bool_value_box.setChecked(_as_bool(settings.Value))
+                bool_value_box.setChecked(str(val).lower() == "true")
                 bool_value_box.blockSignals(False)
-                bool_value_box.setVisible(True)
-                value_hint_label.setText("控制自动化总开关：勾选为启用，取消为禁用。")
-                settings.Value = bool_value_box.isChecked()
+                value_hint_label.setText("勾选表示开启自动化，取消勾选表示关闭。")
+            elif name == "CurrentAutomationConfig":
+                config_value_combo.show()
+                config_value_combo.blockSignals(True)
+                config_value_combo.clear()
+                try:
+                    configs = self.window().automation_runtime.context.settings._conf.list_configs()
+                except Exception:
+                    try:
+                        from file import config_center
+                        cw_home = config_center.CW_HOME
+                        import os
+                        folder = cw_home / "config" / "Automations"
+                        if folder.exists():
+                            configs = [f[:-5] for f in os.listdir(folder) if f.endswith(".json")]
+                        else:
+                            configs = ["Default"]
+                    except Exception:
+                        configs = ["Default"]
 
+                for c in configs:
+                    config_value_combo.addItem(c)
+                idx = config_value_combo.findText(str(val))
+                if idx >= 0:
+                    config_value_combo.setCurrentIndex(idx)
+                config_value_combo.blockSignals(False)
+                value_hint_label.setText("选择要切换到的自动化配置文件。")
             else:
-                custom_name = custom_name_edit.text().strip()
-                settings.Name = custom_name
+                raw_value_edit.show()
                 raw_value_edit.blockSignals(True)
-                raw_value_edit.setText("" if settings.Value is None else str(settings.Value))
+                raw_value_edit.setText(str(val) if val is not None else "")
                 raw_value_edit.blockSignals(False)
-                raw_value_edit.setVisible(True)
-                value_hint_label.setText(
-                    "这里按原样填写字符串值。只有当运行时 settings 对象存在同名属性时才可能生效。"
-                )
+                value_hint_label.setText("输入原始字符串值（暂不支持复杂类型对象）。")
 
-        def _on_name_mode_changed(_):
-            _update_name_and_value_ui()
+        _update_value_ui()
+        combo.currentIndexChanged.connect(_update_value_ui)
+        combo.lineEdit().textChanged.connect(_update_value_ui)
+
+        def _on_bool_changed(state):
+            settings.Value = (state == Qt.Checked)
             self.changed.emit()
 
-        def _on_custom_name_changed(text: str):
-            if _current_name_mode() == SETTING_CUSTOM:
-                settings.Name = text.strip()
-                self.changed.emit()
+        def _on_config_val_changed(idx):
+            settings.Value = config_value_combo.itemText(idx)
+            self.changed.emit()
 
-        def _on_config_value_changed(text: str):
-            if _current_name_mode() == SETTING_CONFIG:
-                settings.Value = text.strip()
-                self.changed.emit()
+        def _on_raw_changed(txt):
+            settings.Value = txt
+            self.changed.emit()
 
-        def _on_bool_value_changed(state: bool):
-            if _current_name_mode() == SETTING_ENABLED:
-                settings.Value = bool(state)
-                self.changed.emit()
+        bool_value_box.stateChanged.connect(_on_bool_changed)
+        config_value_combo.currentIndexChanged.connect(_on_config_val_changed)
+        raw_value_edit.textChanged.connect(_on_raw_changed)
 
-        def _on_raw_value_changed(text: str):
-            if _current_name_mode() == SETTING_CUSTOM:
-                settings.Value = text
-                self.changed.emit()
-
-        name_combo.currentIndexChanged.connect(_on_name_mode_changed)
-        custom_name_edit.textChanged.connect(_on_custom_name_changed)
-        config_value_combo.textChanged.connect(_on_config_value_changed)
-        bool_value_box.toggled.connect(_on_bool_value_changed)
-        raw_value_edit.textChanged.connect(_on_raw_value_changed)
-
-        _update_name_and_value_ui()
+        section.form.addRow(self._make_label("新值"), value_layout)
 
     # =========================================================
-    # Widgets / helpers
+    # UI Helpers
     # =========================================================
 
     def _make_label(self, text: str) -> BodyLabel:
@@ -1056,337 +989,159 @@ class AutomationPropertyEditor(QWidget):
     def _make_subtle_value_label(self, text: str) -> CaptionLabel:
         label = CaptionLabel("" if text is None else str(text))
         label.setWordWrap(True)
-        label.setStyleSheet("color: #666;")
         return label
 
     def _add_note_row(self, form: QFormLayout, text: str) -> None:
         note = CaptionLabel(text)
         note.setWordWrap(True)
-        note.setStyleSheet("color: #666;")
         form.addRow(note)
 
     def _create_styled_double_spin(self, minimum: float, maximum: float, step: float) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
-        spin.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        spin.setRange(minimum, maximum)
+        spin = DoubleSpinBox()
+        spin.setMinimum(minimum)
+        spin.setMaximum(maximum)
         spin.setSingleStep(step)
-        spin.setDecimals(2 if step < 1 else 0)
-        spin.setMinimumHeight(33)
-        spin.setStyleSheet(
-            """
-            QDoubleSpinBox {
-                padding: 0 10px;
-                border: 1px solid rgba(0, 0, 0, 0.10);
-                border-radius: 6px;
-                background: rgba(255, 255, 255, 0.96);
-            }
-            QDoubleSpinBox:focus {
-                border: 1px solid #009faa;
-            }
-            """
-        )
         return spin
 
-    def _load_subject_options(self) -> list[str]:
-        options: list[str] = []
-        try:
-            for name in list(getattr(list_, "class_kind", []))[1:]:
-                text = str(name).strip()
-                if text and text not in options:
-                    options.append(text)
-        except Exception:
-            pass
-        return options
-
-    def _load_weather_options(self) -> list[str]:
-        options: list[str] = []
-        try:
-            import weather as weather_module
-
-            api_name = config_center.read_conf("Weather", "api", None)
-            status_data = weather_module.weather_processor._load_weather_status(api_name)
-
-            for item in status_data.get("weatherinfo", []):
-                code = str(item.get("code", "")).strip()
-                if not code:
-                    continue
-                name = str(item.get("wea", code)).strip()
-                label = f"{name} ({code})"
-                if label not in options:
-                    options.append(label)
-        except Exception:
-            pass
-        return options
-
-    @staticmethod
-    def _parse_weather_code_text(text: str) -> str:
-        text = str(text or "").strip()
-        if not text:
-            return ""
-        if text.endswith(")") and "(" in text:
-            maybe = text[text.rfind("(") + 1:-1].strip()
-            if maybe:
-                return maybe
-        return text
-
-    def _add_ruleset_mode_combo(
-        self,
-        form: QFormLayout,
-        title: str,
-        obj: Any,
-        attr: str,
-        hint: str = "",
-    ) -> None:
-        combo = ComboBox()
-        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        combo_add_item(combo, "任意满足即可（OR）", RulesetLogicalMode.Or)
-        combo_add_item(combo, "全部都要满足（AND）", RulesetLogicalMode.And)
-
-        current = getattr(obj, attr, RulesetLogicalMode.Or)
-        idx = combo.findData(current)
-        combo.setCurrentIndex(max(0, idx))
-
-        def _on_changed(_):
-            setattr(obj, attr, combo_current_data(combo))
-            self.changed.emit()
-
-        combo.currentIndexChanged.connect(_on_changed)
-        form.addRow(self._make_label(title), FieldWidget(combo, hint))
-
     def _add_line_edit(
-        self,
-        form: QFormLayout,
-        title: str,
-        obj: Any,
-        attr: str,
-        cast_to_str: bool = False,
-        hint: str = "",
+            self,
+            form: QFormLayout,
+            title: str,
+            obj: Any,
+            attr: str,
+            hint: str = "",
     ) -> None:
         edit = LineEdit()
-        edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        current = getattr(obj, attr, "")
-        edit.setText("" if current is None else str(current))
+        edit.setText(str(getattr(obj, attr, "")))
 
         def _on_changed(text: str):
-            setattr(obj, attr, text if cast_to_str else text)
+            setattr(obj, attr, text)
             self.changed.emit()
 
         edit.textChanged.connect(_on_changed)
         form.addRow(self._make_label(title), FieldWidget(edit, hint))
 
-    def _add_checkbox(self, form: QFormLayout, title: str, obj: Any, attr: str, hint: str = "") -> None:
-        box = CheckBox()
-        box.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Fixed)
+    def _add_checkbox(
+            self,
+            form: QFormLayout,
+            title: str,
+            obj: Any,
+            attr: str,
+            hint: str = "",
+    ) -> None:
+        box = CheckBox(title)
         box.setChecked(bool(getattr(obj, attr, False)))
 
-        def _on_changed(state: bool):
-            setattr(obj, attr, bool(state))
+        def _on_changed(state: int):
+            setattr(obj, attr, state == Qt.Checked)
             self.changed.emit()
 
-        box.toggled.connect(_on_changed)
-        form.addRow(self._make_label(title), FieldWidget(box, hint))
+        box.stateChanged.connect(_on_changed)
+        form.addRow(self._make_label(""), FieldWidget(box, hint))
 
     def _add_double_spin(
-        self,
-        form: QFormLayout,
-        title: str,
-        obj: Any,
-        attr: str,
-        minimum: float,
-        maximum: float,
-        step: float,
-        hint: str = "",
+            self,
+            form: QFormLayout,
+            title: str,
+            obj: Any,
+            attr: str,
+            minimum: float,
+            maximum: float,
+            step: float,
+            hint: str = "",
     ) -> None:
-        current_raw = getattr(obj, attr, 0)
-
-        use_int_style = False
-        try:
-            current_float = float(current_raw)
-            use_int_style = step >= 1 and float(int(current_float)) == current_float
-        except Exception:
-            current_float = 0.0
-            use_int_style = step >= 1
-
-        if use_int_style and float(int(minimum)) == float(minimum) and float(int(maximum)) == float(maximum):
-            spin = SpinBox()
-            spin.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            spin.setMinimum(int(minimum))
-            spin.setMaximum(int(maximum))
-            spin.setValue(int(current_float))
-
-            def _on_changed(value: int):
-                setattr(obj, attr, float(value))
-                self.changed.emit()
-
-            spin.valueChanged.connect(_on_changed)
-            form.addRow(self._make_label(title), FieldWidget(spin, hint))
-            return
-
-        spin = self._create_styled_double_spin(minimum, maximum, step)
-        try:
-            spin.setValue(float(current_raw))
-        except Exception:
-            spin.setValue(0)
-
-        def _on_changed(value: float):
-            setattr(obj, attr, float(value))
-            self.changed.emit()
-
-        spin.valueChanged.connect(_on_changed)
-        form.addRow(self._make_label(title), FieldWidget(spin, hint))
-
-    def _add_int_spin(
-        self,
-        form: QFormLayout,
-        title: str,
-        obj: Any,
-        attr: str,
-        minimum: int,
-        maximum: int,
-        hint: str = "",
-    ) -> None:
-        spin = SpinBox()
-        spin.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        spin = DoubleSpinBox()
         spin.setMinimum(minimum)
         spin.setMaximum(maximum)
-        try:
-            spin.setValue(int(getattr(obj, attr, 0)))
-        except Exception:
-            spin.setValue(0)
+        spin.setSingleStep(step)
+        spin.setValue(float(getattr(obj, attr, 0.0) or 0.0))
 
-        def _on_changed(value: int):
-            setattr(obj, attr, int(value))
+        def _on_changed(val: float):
+            setattr(obj, attr, val)
             self.changed.emit()
 
         spin.valueChanged.connect(_on_changed)
         form.addRow(self._make_label(title), FieldWidget(spin, hint))
 
-    def _add_subject_combo(
-        self,
-        form: QFormLayout,
-        title: str,
-        obj: Any,
-        attr: str,
-        hint: str = "",
-    ) -> None:
-        combo = EditableComboBox()
-        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-        options = self._load_subject_options()
-        current = str(getattr(obj, attr, "") or "").strip()
-
-        try:
-            combo.addItems(options)
-        except Exception:
-            pass
-
-        if current:
-            try:
-                combo.setCurrentText(current)
-            except Exception:
-                pass
-
-        def _commit_value(_text: str = ""):
-            try:
-                value = str(combo.currentText()).strip()
-            except Exception:
-                value = ""
-            setattr(obj, attr, value)
-            self.changed.emit()
-
-        combo.textChanged.connect(_commit_value)
-        form.addRow(self._make_label(title), FieldWidget(combo, hint))
-
-    def _add_current_weather_combo(
-        self,
-        form: QFormLayout,
-        title: str,
-        obj: Any,
-        attr: str,
-        hint: str = "",
-    ) -> None:
-        combo = EditableComboBox()
-        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
-        options = self._load_weather_options()
-        current_raw = getattr(obj, attr, 0)
-        current_code = "" if current_raw is None else str(current_raw).strip()
-
-        try:
-            combo.addItems(options)
-        except Exception:
-            pass
-
-        if current_code:
-            matched_label = None
-            for label in options:
-                if self._parse_weather_code_text(label) == current_code:
-                    matched_label = label
-                    break
-            try:
-                combo.setCurrentText(matched_label or current_code)
-            except Exception:
-                pass
-
-        def _commit_value(_text: str = ""):
-            try:
-                text = str(combo.currentText()).strip()
-            except Exception:
-                text = ""
-            code = self._parse_weather_code_text(text)
-            if not code:
-                return
-            try:
-                setattr(obj, attr, int(code))
-            except Exception:
-                return
-            self.changed.emit()
-
-        combo.textChanged.connect(_commit_value)
-        form.addRow(self._make_label(title), FieldWidget(combo, hint))
-
-    def _add_time_state_combo(
-        self,
-        form: QFormLayout,
-        title: str,
-        obj: Any,
-        attr: str,
-        hint: str = "",
+    def _add_ruleset_mode_combo(
+            self,
+            form: QFormLayout,
+            title: str,
+            obj: Any,
+            attr: str,
+            hint: str = "",
     ) -> None:
         combo = ComboBox()
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        combo_add_item(combo, "无", TimeState.None_)
-        combo_add_item(combo, "上课", TimeState.OnClass)
-        combo_add_item(combo, "准备上课（当前不可用）", TimeState.PrepareOnClass)
-        combo_add_item(combo, "课间休息", TimeState.Breaking)
-        combo_add_item(combo, "放学后", TimeState.AfterSchool)
+        combo_add_item(combo, "或 (Or)", RulesetLogicalMode.Or)
+        combo_add_item(combo, "且 (And)", RulesetLogicalMode.And)
 
         try:
-            model = combo.model()
-            item = model.item(2)
-            if item is not None:
-                item.setEnabled(False)
+            current = RulesetLogicalMode.from_value(getattr(obj, attr, RulesetLogicalMode.Or))
         except Exception:
-            pass
+            current = RulesetLogicalMode.Or
+        setattr(obj, attr, current)
 
-        current = getattr(obj, attr, TimeState.OnClass)
         idx = combo.findData(current)
         combo.setCurrentIndex(max(0, idx))
 
         def _on_changed(_):
-            setattr(obj, attr, combo_current_data(combo))
+            try:
+                selected = RulesetLogicalMode.from_value(combo_current_data(combo))
+            except Exception:
+                selected = RulesetLogicalMode.Or
+            setattr(obj, attr, selected)
+            self.changed.emit()
+
+        combo.currentIndexChanged.connect(_on_changed)
+        form.addRow(self._make_label(title), FieldWidget(combo, hint))
+
+    def _add_time_state_combo(
+            self,
+            form: QFormLayout,
+            title: str,
+            obj: Any,
+            attr: str,
+            hint: str = "",
+    ) -> None:
+        combo = ComboBox()
+        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        combo_add_item(combo, "无 (None)", TimeState.None_)
+        combo_add_item(combo, "上课中 (OnClass)", TimeState.OnClass)
+        combo_add_item(combo, "课间休息 (Breaking)", TimeState.Breaking)
+        combo_add_item(combo, "已放学 (AfterSchool)", TimeState.AfterSchool)
+
+        try:
+            current = TimeState.from_value(getattr(obj, attr, TimeState.None_))
+        except Exception:
+            current = TimeState.None_
+
+        if current == TimeState.PrepareOnClass:
+            current = TimeState.OnClass
+
+        setattr(obj, attr, current)
+
+        idx = combo.findData(current)
+        combo.setCurrentIndex(max(0, idx))
+
+        def _on_changed(_):
+            try:
+                selected = TimeState.from_value(combo_current_data(combo))
+            except Exception:
+                selected = TimeState.None_
+            setattr(obj, attr, selected)
             self.changed.emit()
 
         combo.currentIndexChanged.connect(_on_changed)
         form.addRow(self._make_label(title), FieldWidget(combo, hint))
 
     def _add_pre_time_point_state_combo(
-        self,
-        form: QFormLayout,
-        title: str,
-        obj: Any,
-        attr: str,
-        hint: str = "",
+            self,
+            form: QFormLayout,
+            title: str,
+            obj: Any,
+            attr: str,
+            hint: str = "",
     ) -> None:
         combo = ComboBox()
         combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1401,7 +1156,6 @@ class AutomationPropertyEditor(QWidget):
         except Exception:
             current = TimeState.OnClass
 
-        # 兼容旧版本错误 UI 保存出来的 PrepareOnClass
         if current == TimeState.PrepareOnClass:
             current = TimeState.OnClass
 
@@ -1429,28 +1183,14 @@ class AutomationPropertyEditor(QWidget):
         form.addRow(self._make_label(title), FieldWidget(combo, hint))
 
 
-    def _add_window_state_combo(
-        self,
-        form: QFormLayout,
-        title: str,
-        obj: Any,
-        attr: str,
-        hint: str = "",
-    ) -> None:
-        combo = ComboBox()
-        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        combo_add_item(combo, "正常", 0)
-        combo_add_item(combo, "最大化", 1)
-        combo_add_item(combo, "最小化", 2)
-        combo_add_item(combo, "全屏", 3)
+class DoubleSpinBox(SpinBox):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDecimals(1)
 
-        current = int(getattr(obj, attr, 1))
-        idx = combo.findData(current)
-        combo.setCurrentIndex(max(0, idx))
+    def value(self) -> float:
+        return super().value()
 
-        def _on_changed(_):
-            setattr(obj, attr, int(combo_current_data(combo)))
-            self.changed.emit()
+    def setValue(self, val: float) -> None:
+        super().setValue(float(val))
 
-        combo.currentIndexChanged.connect(_on_changed)
-        form.addRow(self._make_label(title), FieldWidget(combo, hint))

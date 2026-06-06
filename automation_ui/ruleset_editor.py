@@ -3,17 +3,23 @@ from __future__ import annotations
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QDialog,
+    QFrame,
     QHBoxLayout,
     QListWidgetItem,
     QSplitter,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 from qfluentwidgets import (
+    BodyLabel,
     CaptionLabel,
     ListWidget,
     PushButton,
     StrongBodyLabel,
+    SmoothScrollArea,
+    isDarkTheme,
+    qconfig,
 )
 
 from automation.builtins import register_builtins
@@ -21,7 +27,6 @@ from automation.compat import RULE_SETTINGS_TYPES
 from automation.enums import RulesetLogicalMode
 from automation.models import Rule, RuleGroup, Workflow
 from automation.registry import get_registered_rule_ids, get_rule_info
-
 
 HIDDEN_RULE_IDS = {
     "classisland.test.true",
@@ -84,159 +89,37 @@ RULE_NAME_FALLBACKS: dict[str, str] = {
 }
 
 
-class RulePickerDialog(QDialog):
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        register_builtins()
-
-        self.setWindowTitle("选择规则")
-        self.resize(760, 480)
-        self.selected_rule_id: str | None = None
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 20, 20, 20)
-        root.setSpacing(12)
-
-        title = StrongBodyLabel("选择规则")
-        root.addWidget(title)
-
-        tip = CaptionLabel("先选择左侧分组，再选择右侧具体规则。")
-        tip.setWordWrap(True)
-        tip.setStyleSheet("color: #666;")
-        root.addWidget(tip)
-
-        body = QHBoxLayout()
-        root.addLayout(body, 1)
-
-        self.group_list = ListWidget()
-        self.group_list.setMinimumWidth(180)
-        self.rule_list = ListWidget()
-
-        body.addWidget(self.group_list, 2)
-        body.addWidget(self.rule_list, 4)
-
-        self.desc_label = CaptionLabel("请选择一个规则后，这里会显示它的用途。")
-        self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet("color: #666;")
-        root.addWidget(self.desc_label)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        self.ok_btn = PushButton("确定")
-        self.cancel_btn = PushButton("取消")
-        self.ok_btn.setEnabled(False)
-        btn_row.addWidget(self.ok_btn)
-        btn_row.addWidget(self.cancel_btn)
-        root.addLayout(btn_row)
-
-        self.group_list.currentRowChanged.connect(self._on_group_changed)
-        self.rule_list.currentRowChanged.connect(self._on_rule_changed)
-        self.rule_list.itemDoubleClicked.connect(lambda _: self._accept_current())
-        self.ok_btn.clicked.connect(self._accept_current)
-        self.cancel_btn.clicked.connect(self.reject)
-
-        for group_name in self._available_groups().keys():
-            self.group_list.addItem(group_name)
-
-        if self.group_list.count() > 0:
-            self.group_list.setCurrentRow(0)
-
-    def _available_groups(self) -> dict[str, list[str]]:
-        result = {k: v[:] for k, v in RULE_GROUPS.items()}
-
-        registered = set(get_registered_rule_ids())
-        known = {rid for ids in RULE_GROUPS.values() for rid in ids}
-        extras = [
-            rid for rid in sorted(registered)
-            if rid not in known and rid not in HIDDEN_RULE_IDS
-        ]
-        if extras:
-            result["其它"] = extras
-
-        return result
-
-    def _rule_name(self, rule_id: str) -> str:
-        info = get_rule_info(rule_id)
-        if info and getattr(info, "Name", None):
-            return info.Name
-        return RULE_NAME_FALLBACKS.get(rule_id, rule_id)
-
-    def _on_group_changed(self, row: int) -> None:
-        self.rule_list.clear()
-        self.desc_label.setText("请选择一个规则后，这里会显示它的用途。")
-        self.ok_btn.setEnabled(False)
-
-        if row < 0:
-            return
-
-        groups = self._available_groups()
-        group_name = self.group_list.item(row).text()
-        ids = groups.get(group_name, [])
-
-        for rule_id in ids:
-            item = QListWidgetItem(self._rule_name(rule_id))
-            item.setData(Qt.UserRole, rule_id)
-            item.setToolTip(rule_id)
-            self.rule_list.addItem(item)
-
-        if self.rule_list.count() > 0:
-            self.rule_list.setCurrentRow(0)
-
-    def _on_rule_changed(self, row: int) -> None:
-        item = self.rule_list.item(row)
-        if item is None:
-            self.desc_label.setText("请选择一个规则后，这里会显示它的用途。")
-            self.ok_btn.setEnabled(False)
-            return
-
-        rule_id = item.data(Qt.UserRole)
-        self.desc_label.setText(RULE_DESCRIPTIONS.get(rule_id, f"规则 ID：{rule_id}"))
-        self.ok_btn.setEnabled(True)
-
-    def _accept_current(self) -> None:
-        item = self.rule_list.currentItem()
-        if item is None:
-            return
-        self.selected_rule_id = item.data(Qt.UserRole)
-        self.accept()
-
-
 class RulesetEditor(QWidget):
-    changed = pyqtSignal()
-    targetChanged = pyqtSignal(str, object)
+    rule_selection_changed = pyqtSignal(str, object)
+    data_changed = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        register_builtins()
-
         self._workflow: Workflow | None = None
         self._current_group_index: int = -1
         self._current_rule_index: int = -1
-        self._updating = False
-        self._suspend_target_emit = False
 
-        self._build_ui()
-
-    def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
 
         self.status_label = CaptionLabel("未选择工作流。")
         self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("color: #666;")
         root.addWidget(self.status_label)
 
         top_row = QHBoxLayout()
-        top_row.setSpacing(10)
-        self.edit_ruleset_btn = PushButton("规则集属性")
+        top_row.setSpacing(8)
+        self.edit_ruleset_btn = PushButton("编辑全局规则集属性")
         top_row.addWidget(self.edit_ruleset_btn)
+
+        self.live_status_label = StrongBodyLabel("")
+        top_row.addWidget(self.live_status_label)
+
         top_row.addStretch(1)
         root.addLayout(top_row)
 
         self.summary_label = CaptionLabel("")
         self.summary_label.setWordWrap(True)
-        self.summary_label.setStyleSheet("color: #666;")
         root.addWidget(self.summary_label)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
@@ -250,17 +133,15 @@ class RulesetEditor(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
 
-        group_header = StrongBodyLabel("规则组")
-        left_layout.addWidget(group_header)
+        left_layout.addWidget(StrongBodyLabel("规则组"))
 
         self.group_list = ListWidget()
         self.group_list.setAlternatingRowColors(True)
-        self.group_list.setMinimumHeight(120)
         left_layout.addWidget(self.group_list, 1)
 
         group_btns = QHBoxLayout()
-        self.add_group_btn = PushButton("添加规则组")
-        self.del_group_btn = PushButton("删除规则组")
+        self.add_group_btn = PushButton("添加组")
+        self.del_group_btn = PushButton("删除组")
         group_btns.addWidget(self.add_group_btn)
         group_btns.addWidget(self.del_group_btn)
         left_layout.addLayout(group_btns)
@@ -268,10 +149,8 @@ class RulesetEditor(QWidget):
         group_move_btns = QHBoxLayout()
         self.group_up_btn = PushButton("上移")
         self.group_down_btn = PushButton("下移")
-        self.edit_group_btn = PushButton("当前组属性")
         group_move_btns.addWidget(self.group_up_btn)
         group_move_btns.addWidget(self.group_down_btn)
-        group_move_btns.addWidget(self.edit_group_btn)
         left_layout.addLayout(group_move_btns)
 
         self.main_splitter.addWidget(self.left_panel)
@@ -281,12 +160,10 @@ class RulesetEditor(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
 
-        rule_header = StrongBodyLabel("规则")
-        right_layout.addWidget(rule_header)
+        right_layout.addWidget(StrongBodyLabel("规则 (当前组)"))
 
         self.rule_list = ListWidget()
         self.rule_list.setAlternatingRowColors(True)
-        self.rule_list.setMinimumHeight(140)
         right_layout.addWidget(self.rule_list, 1)
 
         rule_btns = QHBoxLayout()
@@ -299,475 +176,483 @@ class RulesetEditor(QWidget):
         rule_move_btns = QHBoxLayout()
         self.rule_up_btn = PushButton("上移")
         self.rule_down_btn = PushButton("下移")
-        self.change_rule_btn = PushButton("更换规则类型")
-        self.edit_rule_btn = PushButton("当前规则属性")
         rule_move_btns.addWidget(self.rule_up_btn)
         rule_move_btns.addWidget(self.rule_down_btn)
-        rule_move_btns.addWidget(self.change_rule_btn)
-        rule_move_btns.addWidget(self.edit_rule_btn)
         right_layout.addLayout(rule_move_btns)
 
         self.rule_tip = CaptionLabel("选中规则组或规则后，其详细属性会显示在左下角“参数设置”区域。")
         self.rule_tip.setWordWrap(True)
-        self.rule_tip.setStyleSheet("color: #666;")
         right_layout.addWidget(self.rule_tip)
 
         self.main_splitter.addWidget(self.right_panel)
-
-        QTimer.singleShot(0, self._apply_initial_sizes)
+        self.main_splitter.setStretchFactor(0, 1)
+        self.main_splitter.setStretchFactor(1, 1)
 
         self.edit_ruleset_btn.clicked.connect(self._on_edit_ruleset)
-        self.edit_group_btn.clicked.connect(self._on_edit_group)
-        self.edit_rule_btn.clicked.connect(self._on_edit_rule)
 
-        self.group_list.currentRowChanged.connect(self._on_group_selected)
-        self.rule_list.currentRowChanged.connect(self._on_rule_selected)
+        self.group_list.currentRowChanged.connect(self._on_group_selection_changed)
+        # 增加这一行，确保鼠标重复点击同一行也能切过去
+        self.group_list.itemClicked.connect(lambda item: self._on_group_selection_changed(self.group_list.row(item)))
 
-        # 关键：即使重复点击当前项，也强制切换左下角属性面板
-        self.group_list.itemClicked.connect(self._on_group_item_clicked)
-        self.rule_list.itemClicked.connect(self._on_rule_item_clicked)
+        self.rule_list.currentRowChanged.connect(self._on_rule_selection_changed)
+        # 增加这一行，确保鼠标重复点击同一行也能切过去
+        self.rule_list.itemClicked.connect(lambda item: self._on_rule_selection_changed(self.rule_list.row(item)))
 
         self.add_group_btn.clicked.connect(self._on_add_group)
-        self.del_group_btn.clicked.connect(self._on_delete_group)
+        self.del_group_btn.clicked.connect(self._on_del_group)
         self.group_up_btn.clicked.connect(self._on_group_up)
         self.group_down_btn.clicked.connect(self._on_group_down)
 
         self.add_rule_btn.clicked.connect(self._on_add_rule)
-        self.del_rule_btn.clicked.connect(self._on_delete_rule)
+        self.del_rule_btn.clicked.connect(self._on_del_rule)
         self.rule_up_btn.clicked.connect(self._on_rule_up)
         self.rule_down_btn.clicked.connect(self._on_rule_down)
-        self.change_rule_btn.clicked.connect(self._on_change_rule_type)
 
-    def _apply_initial_sizes(self) -> None:
-        self.main_splitter.setSizes([260, 520])
+        self._live_timer = QTimer(self)
+        self._live_timer.timeout.connect(self._update_live_status)
+
+        self._update_ui_state()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._live_timer.start(1000)
+        self._update_live_status()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._live_timer.stop()
 
     def set_workflow(self, workflow: Workflow | None) -> None:
         self._workflow = workflow
         self._current_group_index = -1
         self._current_rule_index = -1
+        self._update_ui_state()
+        self._reload_groups()
+        self._update_live_status()
 
-        self._ensure_structure()
-
-        self._suspend_target_emit = True
-        try:
-            self._reload_all()
-        finally:
-            self._suspend_target_emit = False
-
-    def clear_selection_focus(self) -> None:
-        """
-        只清“视觉选中”，保留当前规则组索引。
-        否则重载后直接点击规则时，会因为丢失 group index 导致无法解析当前规则。
-        """
-        self._suspend_target_emit = True
-        try:
-            if self._current_group_index < 0 and self._workflow is not None:
-                groups = self._workflow.Ruleset.Groups
-                if groups:
-                    self._current_group_index = 0
-
-            self._current_rule_index = -1
-
-            self.group_list.blockSignals(True)
-            self.group_list.clearSelection()
-            self.group_list.blockSignals(False)
-
-            self.rule_list.blockSignals(True)
-            self.rule_list.clearSelection()
-            self.rule_list.setCurrentRow(-1)
-            self.rule_list.blockSignals(False)
-        finally:
-            self._suspend_target_emit = False
-
-    def refresh_display_texts(self) -> None:
-        self._suspend_target_emit = True
-        try:
-            self._reload_group_list()
-            self._reload_rule_list()
-            self._reload_status()
-        finally:
-            self._suspend_target_emit = False
-
-    def _ensure_structure(self) -> None:
-        if self._workflow is None:
-            return
-
-        if self._workflow.Ruleset is None:
-            from automation.models import Ruleset
-            self._workflow.Ruleset = Ruleset()
-
-        if not self._workflow.Ruleset.Groups:
-            self._workflow.Ruleset.Groups = [RuleGroup(Rules=[Rule()])]
-
-        for group in self._workflow.Ruleset.Groups:
-            if not group.Rules:
-                group.Rules = [Rule()]
-
-    def _reload_all(self) -> None:
-        self._updating = True
-        try:
-            self._reload_status()
-            self._reload_group_list()
-            self._reload_rule_list()
-            self._update_buttons_state()
-        finally:
-            self._updating = False
-
-    def _reload_status(self) -> None:
-        if self._workflow is None:
-            self.status_label.setText("未选择工作流。")
-            self.summary_label.setText("")
-            return
-
-        ruleset = self._workflow.Ruleset
-        group_count = len(ruleset.Groups)
-        rule_count = sum(len(g.Rules) for g in ruleset.Groups)
-        mode_text = "AND" if ruleset.Mode == RulesetLogicalMode.And else "OR"
-        reversed_text = "已反转" if ruleset.IsReversed else "未反转"
-
-        self.status_label.setText("提示：规则组与规则的详细属性已统一移动到左下角“参数设置”区域。")
-        self.summary_label.setText(
-            f"规则集状态：{group_count} 个规则组 / {rule_count} 条规则    ·    逻辑：{mode_text}    ·    {reversed_text}"
-        )
-
-    def _reload_group_list(self) -> None:
-        self.group_list.clear()
-
-        if self._workflow is None:
-            return
-
-        groups = self._workflow.Ruleset.Groups
-        for i, group in enumerate(groups):
-            logic = "AND" if group.Mode == RulesetLogicalMode.And else "OR"
-            state = "启用" if group.IsEnabled else "禁用"
-            reversed_text = " / 反转" if group.IsReversed else ""
-            item = QListWidgetItem(f"规则组 {i + 1} [{state} / {logic}{reversed_text}]")
-            self.group_list.addItem(item)
-
-        if groups:
-            if self._current_group_index < 0:
-                self._current_group_index = 0
-            self._current_group_index = min(self._current_group_index, len(groups) - 1)
-
-            self.group_list.blockSignals(True)
-            self.group_list.setCurrentRow(self._current_group_index)
-            self.group_list.blockSignals(False)
-        else:
-            self._current_group_index = -1
-
-    def _reload_rule_list(self) -> None:
-        self.rule_list.clear()
-
-        group = self._current_group()
-        if group is None:
-            self._current_rule_index = -1
-            return
-
-        for i, rule in enumerate(group.Rules):
-            name = self._rule_name(rule.Id) if rule.Id else "未选择规则"
-            reversed_text = " / 反转" if rule.IsReversed else ""
-            self.rule_list.addItem(QListWidgetItem(f"规则 {i + 1}: {name}{reversed_text}"))
-
-        if group.Rules and self._current_rule_index >= 0:
-            self._current_rule_index = min(self._current_rule_index, len(group.Rules) - 1)
-            self.rule_list.blockSignals(True)
-            self.rule_list.setCurrentRow(self._current_rule_index)
-            self.rule_list.blockSignals(False)
-        else:
-            self._current_rule_index = -1
-            self.rule_list.blockSignals(True)
-            self.rule_list.setCurrentRow(-1)
-            self.rule_list.blockSignals(False)
-
-    def _update_buttons_state(self) -> None:
-        workflow_exists = self._workflow is not None
-        group_exists = self._current_group() is not None
-        rule_exists = self._current_rule() is not None
-
-        self.edit_ruleset_btn.setEnabled(workflow_exists)
-
-        self.del_group_btn.setEnabled(group_exists)
-        self.group_up_btn.setEnabled(group_exists)
-        self.group_down_btn.setEnabled(group_exists)
-        self.edit_group_btn.setEnabled(group_exists)
-
-        self.add_rule_btn.setEnabled(group_exists)
-        self.del_rule_btn.setEnabled(rule_exists)
-        self.rule_up_btn.setEnabled(rule_exists)
-        self.rule_down_btn.setEnabled(rule_exists)
-        self.change_rule_btn.setEnabled(rule_exists)
-        self.edit_rule_btn.setEnabled(rule_exists)
-
-    def _current_group(self) -> RuleGroup | None:
-        if self._workflow is None:
-            return None
-        groups = self._workflow.Ruleset.Groups
-        if 0 <= self._current_group_index < len(groups):
-            return groups[self._current_group_index]
-        return None
-
-    def _current_rule(self) -> Rule | None:
-        group = self._current_group()
-        if group is None:
-            return None
-        if 0 <= self._current_rule_index < len(group.Rules):
-            return group.Rules[self._current_rule_index]
-        return None
-
-    def _rule_name(self, rule_id: str) -> str:
-        info = get_rule_info(rule_id)
-        if info and getattr(info, "Name", None):
-            return info.Name
-        return RULE_NAME_FALLBACKS.get(rule_id, rule_id)
-
-    def _emit_changed(self) -> None:
-        if self._updating:
-            return
-        self.changed.emit()
-
-    def _emit_target(self, kind: str, target: object | None) -> None:
-        if self._suspend_target_emit or target is None:
-            return
-        self.targetChanged.emit(kind, target)
-
-    def _on_edit_ruleset(self) -> None:
-        if self._workflow is None:
-            return
-        self._emit_target("ruleset", self._workflow.Ruleset)
-
-    def _on_edit_group(self) -> None:
-        group = self._current_group()
-        if group is None:
-            return
-        self._emit_target("rule_group", group)
-
-    def _on_edit_rule(self) -> None:
-        rule = self._current_rule()
-        if rule is None:
-            return
-        self._emit_target("rule", rule)
-
-    def _on_group_item_clicked(self, item) -> None:
-        row = self.group_list.row(item)
-        if row < 0:
-            return
-
-        self._current_group_index = row
-        self._current_rule_index = -1
+    def clear_selection(self) -> None:
+        self.group_list.blockSignals(True)
+        self.group_list.setCurrentRow(-1)
+        self.group_list.clearSelection()
+        self._current_group_index = -1
+        self.group_list.blockSignals(False)
 
         self.rule_list.blockSignals(True)
-        self.rule_list.clearSelection()
         self.rule_list.setCurrentRow(-1)
+        self.rule_list.clearSelection()
+        self.rule_list.clear()
+        self._current_rule_index = -1
         self.rule_list.blockSignals(False)
 
-        group = self._current_group()
-        if group is not None:
-            self._emit_target("rule_group", group)
+    def _get_ruleset(self):
+        if self._workflow:
+            if self._workflow.Ruleset is None:
+                from automation.models import Ruleset
+                self._workflow.Ruleset = Ruleset()
+            return self._workflow.Ruleset
+        return None
 
-    def _on_rule_item_clicked(self, item) -> None:
-        row = self.rule_list.row(item)
+    def _update_ui_state(self) -> None:
+        has_wf = self._workflow is not None
+        self.edit_ruleset_btn.setEnabled(has_wf)
+        self.add_group_btn.setEnabled(has_wf)
+
+        has_group = has_wf and self._current_group_index >= 0
+        self.del_group_btn.setEnabled(has_group)
+        self.group_up_btn.setEnabled(has_group)
+        self.group_down_btn.setEnabled(has_group)
+        self.add_rule_btn.setEnabled(has_group)
+
+        has_rule = has_group and self._current_rule_index >= 0
+        self.del_rule_btn.setEnabled(has_rule)
+        self.rule_up_btn.setEnabled(has_rule)
+        self.rule_down_btn.setEnabled(has_rule)
+
+        if not has_wf:
+            self.status_label.setText("未选择工作流。")
+            self.summary_label.setText("")
+        else:
+            rs = self._get_ruleset()
+            groups_cnt = len(rs.Groups)
+            rules_cnt = sum(len(g.Rules) for g in rs.Groups)
+            mode_str = "且 (AND)" if rs.Mode == RulesetLogicalMode.And else "或 (OR)"
+            rev_str = " (结果反转)" if rs.IsReversed else ""
+            self.status_label.setText(f"当前工作流规则集：全局逻辑 {mode_str}{rev_str}")
+            self.summary_label.setText(f"共包含 {groups_cnt} 个规则组，{rules_cnt} 条规则。")
+
+    def _reload_groups(self) -> None:
+        self.group_list.clear()
+        self.rule_list.clear()
+
+        rs = self._get_ruleset()
+        if not rs:
+            return
+
+        for i, g in enumerate(rs.Groups):
+            mode_str = "且" if getattr(g, "Mode", 0) == 1 else "或"
+            enabled = "已启用" if getattr(g, "IsEnabled", True) else "已禁用"
+            rev = "反转" if getattr(g, "IsReversed", False) else "正向"
+            text = f"组 {i + 1} [{mode_str} / {enabled} / {rev}] ({len(g.Rules)}条)"
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole + 1, text)  # 保存纯净的文本用于追加状态
+            self.group_list.addItem(item)
+
+        if rs.Groups:
+            if self._current_group_index < 0:
+                self._current_group_index = 0
+            self._current_group_index = min(self._current_group_index, len(rs.Groups) - 1)
+            self.group_list.setCurrentRow(self._current_group_index)
+
+    def _reload_rules(self, select_current: bool = False) -> None:
+        self.rule_list.clear()
+        rs = self._get_ruleset()
+        if not rs or self._current_group_index < 0 or self._current_group_index >= len(rs.Groups):
+            return
+
+        group = rs.Groups[self._current_group_index]
+        for r in group.Rules:
+            info = get_rule_info(r.Id)
+            name = info.Name if info and hasattr(info, "Name") else RULE_NAME_FALLBACKS.get(r.Id, r.Id)
+            rev = "[反转] " if getattr(r, "IsReversed", False) else ""
+            text = f"{rev}{name}"
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole + 1, text)
+            self.rule_list.addItem(item)
+
+        if select_current and group.Rules:
+            self._current_rule_index = max(0, min(self._current_rule_index, len(group.Rules) - 1))
+            self.rule_list.setCurrentRow(self._current_rule_index)
+        else:
+            self._current_rule_index = -1
+            self.rule_list.setCurrentRow(-1)
+            self.rule_list.clearSelection()
+
+    def _on_edit_ruleset(self) -> None:
+        rs = self._get_ruleset()
+        if rs:
+            # 删除了 clear_selection()，这样就不破坏左侧的列表了
+            self.rule_selection_changed.emit("ruleset", rs)
+
+    def _on_group_selection_changed(self, row: int) -> None:
         if row < 0:
             return
 
-        if self._current_group_index < 0 and self._workflow is not None and self._workflow.Ruleset.Groups:
-            self._current_group_index = 0
-
-        self._current_rule_index = row
-        rule = self._current_rule()
-        if rule is not None:
-            self._emit_target("rule", rule)
-
-    def _on_group_selected(self, row: int) -> None:
         self._current_group_index = row
         self._current_rule_index = -1
 
-        self._updating = True
-        try:
-            self._reload_rule_list()
-            self._update_buttons_state()
-        finally:
-            self._updating = False
+        self._reload_rules(select_current=False)
+        self._update_ui_state()
 
-        group = self._current_group()
-        if group is not None:
-            self._emit_target("rule_group", group)
+        rs = self._get_ruleset()
+        if rs and 0 <= row < len(rs.Groups):
+            self.rule_selection_changed.emit("rule_group", rs.Groups[row])
+
+    def _on_rule_selection_changed(self, row: int) -> None:
+        if row < 0:
+            return
+        self._current_rule_index = row
+        self._update_ui_state()
+
+        rs = self._get_ruleset()
+        if rs and 0 <= self._current_group_index < len(rs.Groups):
+            group = rs.Groups[self._current_group_index]
+            if 0 <= row < len(group.Rules):
+                self.rule_selection_changed.emit("rule", group.Rules[row])
+
+    # =========================================================
+    # Real-Time Evaluation Engine
+    # =========================================================
+
+    def _get_live_runtime(self):
+        try:
+            return self.window().automation_runtime
+        except AttributeError:
+            return None
+
+    def _eval_rule(self, rule) -> bool | None:
+        if not getattr(rule, "Id", ""):
+            return None
+
+        try:
+            from automation.registry import get_rule_info, coerce_rule_settings
+            info = get_rule_info(rule.Id)
+
+            if not info or not getattr(info, "Handle", None):
+                return False
+
+            # 非常关键：确保新添加的规则也有默认设置对象，否则底层校验必定报错
+            coerce_rule_settings(rule)
+            settings = rule.Settings
+            if settings is None and getattr(info, "SettingsType", None) is not None:
+                try:
+                    settings = info.SettingsType()
+                except Exception:
+                    pass
+
+            res = info.Handle(settings)
+            match = bool(res)
+
+            if getattr(rule, "IsReversed", False):
+                match = not match
+
+            return match
+        except Exception:
+            return False
+
+    def _eval_group(self, group) -> bool | None:
+        if not getattr(group, "IsEnabled", True):
+            return None
+
+        valid_rules = [r for r in getattr(group, "Rules", []) if getattr(r, "Id", "")]
+        if not valid_rules:
+            return None
+
+        mode = getattr(group, "Mode", 0)
+        match = (mode == 1)  # 1=And(且) 时初始为 True；0=Or(或) 时初始为 False
+
+        for r in valid_rules:
+            res = self._eval_rule(r)
+            if res is None:
+                continue
+
+            if (not res) and mode == 1:
+                match = False
+                break
+
+            if res and mode == 0:
+                match = True
+                break
+
+        if getattr(group, "IsReversed", False):
+            match = not match
+
+        return match
+
+    def _eval_ruleset(self, ruleset) -> bool:
+        mode = getattr(ruleset, "Mode", 0)
+        match = (mode == 1)
+
+        groups = getattr(ruleset, "Groups", [])
+        if not groups:
+            return False
+
+        valid_groups = [g for g in groups if getattr(g, "IsEnabled", True)]
+
+        for g in valid_groups:
+            res = self._eval_group(g)
+            if res is None:
+                continue
+
+            if (not res) and mode == 1:
+                match = False
+                break
+
+            if res and mode == 0:
+                match = True
+                break
+
+        if getattr(ruleset, "IsReversed", False):
+            match = not match
+
+        return match
+
+    def _update_live_status(self):
+        rs = self._get_ruleset()
+        if not rs:
+            self.live_status_label.setText("")
+            return
+
+        runtime = self._get_live_runtime()
+        if not runtime:
+            self.live_status_label.setText("（状态：未连接运行时）")
+            self.live_status_label.setStyleSheet("color: #888;")
+            return
+
+        is_rs_match = self._eval_ruleset(rs)
+        if is_rs_match:
+            self.live_status_label.setText(" 状态：✔️ 规则集满足")
+            self.live_status_label.setStyleSheet("color: #0f7b0f;" if not isDarkTheme() else "color: #66cc66;")
+        else:
+            self.live_status_label.setText(" 状态：❌ 规则集不满足")
+            self.live_status_label.setStyleSheet("color: #c42b1c;" if not isDarkTheme() else "color: #ff99a4;")
+
+        for i in range(self.group_list.count()):
+            if i >= len(rs.Groups): break
+            item = self.group_list.item(i)
+            g = rs.Groups[i]
+            is_match = self._eval_group(g)
+            base_text = item.data(Qt.UserRole + 1)
+            if base_text:
+                if is_match is None:
+                    status_str = "⚪ 跳过/为空"
+                else:
+                    status_str = "✔️ 符合" if is_match else "❌ 不符"
+                item.setText(f"{base_text}  [{status_str}]")
+
+        if 0 <= self._current_group_index < len(rs.Groups):
+            group = rs.Groups[self._current_group_index]
+            for i in range(self.rule_list.count()):
+                if i >= len(group.Rules): break
+                item = self.rule_list.item(i)
+                r = group.Rules[i]
+                is_match = self._eval_rule(r)
+                base_text = item.data(Qt.UserRole + 1)
+                if base_text:
+                    if is_match is None:
+                        status_str = "⚪ 未配置"
+                    else:
+                        status_str = "✔️ 符合" if is_match else "❌ 不符"
+                    item.setText(f"{base_text}  [{status_str}]")
+
+    # =========================================================
+    # Rule Picker
+    # =========================================================
+
+    def _get_rule_picker_groups(self):
+        from automation.registry import get_registered_rule_ids, get_rule_info
+        from automation.builtins import register_builtins
+        register_builtins()
+
+        groups = {}
+        registered = set(get_registered_rule_ids())
+
+        for g_name, ids in RULE_GROUPS.items():
+            g_list = []
+            for rid in ids:
+                info = get_rule_info(rid)
+                name = info.Name if info and getattr(info, "Name", None) else RULE_NAME_FALLBACKS.get(rid, rid)
+                g_list.append((rid, name))
+            if g_list:
+                groups[g_name] = g_list
+
+        known = {rid for ids in RULE_GROUPS.values() for rid in ids}
+        extras = []
+        for rid in sorted(registered):
+            if rid not in known and rid not in HIDDEN_RULE_IDS:
+                info = get_rule_info(rid)
+                name = info.Name if info and getattr(info, "Name", None) else RULE_NAME_FALLBACKS.get(rid, rid)
+                extras.append((rid, name))
+
+        if extras:
+            groups["其它"] = extras
+
+        return groups
 
     def _on_add_group(self) -> None:
-        if self._workflow is None:
+        rs = self._get_ruleset()
+        if not rs:
             return
+        from automation.models import RuleGroup
+        rs.Groups.append(RuleGroup())
+        self._current_group_index = len(rs.Groups) - 1
+        self._reload_groups()
+        self._update_ui_state()
+        self.data_changed.emit()
 
-        group = RuleGroup(Rules=[Rule()])
-        self._workflow.Ruleset.Groups.append(group)
-        self._current_group_index = len(self._workflow.Ruleset.Groups) - 1
-        self._current_rule_index = -1
-
-        self._reload_all()
-        self._emit_changed()
-        self._emit_target("rule_group", group)
-
-    def _on_delete_group(self) -> None:
-        if self._workflow is None:
+    def _on_del_group(self) -> None:
+        rs = self._get_ruleset()
+        if not rs or self._current_group_index < 0:
             return
-
-        groups = self._workflow.Ruleset.Groups
-        if not (0 <= self._current_group_index < len(groups)):
-            return
-
-        groups.pop(self._current_group_index)
-        if not groups:
-            groups.append(RuleGroup(Rules=[Rule()]))
-
-        self._current_group_index = min(self._current_group_index, len(groups) - 1)
-        self._current_rule_index = -1
-
-        self._reload_all()
-        self._emit_changed()
-
-        group = self._current_group()
-        if group is not None:
-            self._emit_target("rule_group", group)
-        elif self._workflow is not None:
-            self._emit_target("ruleset", self._workflow.Ruleset)
+        rs.Groups.pop(self._current_group_index)
+        self._current_group_index = -1
+        self._reload_groups()
+        self._update_ui_state()
+        self.data_changed.emit()
 
     def _on_group_up(self) -> None:
-        group = self._current_group()
-        if self._workflow is None or group is None:
+        rs = self._get_ruleset()
+        if not rs or self._current_group_index <= 0:
             return
-
         idx = self._current_group_index
-        if idx <= 0:
-            return
-
-        groups = self._workflow.Ruleset.Groups
-        groups[idx - 1], groups[idx] = groups[idx], groups[idx - 1]
-        self._current_group_index = idx - 1
-
-        self._reload_all()
-        self._emit_changed()
-        self._emit_target("rule_group", self._current_group())
+        rs.Groups[idx - 1], rs.Groups[idx] = rs.Groups[idx], rs.Groups[idx - 1]
+        self._current_group_index -= 1
+        self._reload_groups()
+        self.data_changed.emit()
 
     def _on_group_down(self) -> None:
-        group = self._current_group()
-        if self._workflow is None or group is None:
+        rs = self._get_ruleset()
+        if not rs or self._current_group_index < 0 or self._current_group_index >= len(rs.Groups) - 1:
             return
-
         idx = self._current_group_index
-        groups = self._workflow.Ruleset.Groups
-        if idx < 0 or idx >= len(groups) - 1:
-            return
-
-        groups[idx + 1], groups[idx] = groups[idx], groups[idx + 1]
-        self._current_group_index = idx + 1
-
-        self._reload_all()
-        self._emit_changed()
-        self._emit_target("rule_group", self._current_group())
-
-    def _on_rule_selected(self, row: int) -> None:
-        if self._current_group_index < 0 and self._workflow is not None and self._workflow.Ruleset.Groups:
-            self._current_group_index = 0
-
-        self._current_rule_index = row
-        self._update_buttons_state()
-
-        rule = self._current_rule()
-        if rule is not None:
-            self._emit_target("rule", rule)
+        rs.Groups[idx + 1], rs.Groups[idx] = rs.Groups[idx], rs.Groups[idx + 1]
+        self._current_group_index += 1
+        self._reload_groups()
+        self.data_changed.emit()
 
     def _on_add_rule(self) -> None:
-        group = self._current_group()
-        if group is None:
+        try:
+            rs = self._get_ruleset()
+            if not rs or self._current_group_index < 0:
+                return
+
+            from .automation_page import GroupedPickerDialog
+
+            host = self.window() if self.window() is not None else self
+            dlg = GroupedPickerDialog(
+                "选择规则",
+                self._get_rule_picker_groups(),
+                RULE_DESCRIPTIONS,
+                host
+            )
+
+            if dlg.exec_() == QDialog.Accepted and dlg.selected_id:
+                group = rs.Groups[self._current_group_index]
+                from automation.models import Rule
+                rule = Rule(Id=dlg.selected_id)
+                group.Rules.append(rule)
+                self._current_rule_index = len(group.Rules) - 1
+
+                self.group_list.blockSignals(True)
+                self._reload_groups()
+                self.group_list.setCurrentRow(self._current_group_index)
+                self.group_list.blockSignals(False)
+
+                self._reload_rules(select_current=True)
+                self._update_ui_state()
+                self.rule_selection_changed.emit("rule", rule)
+                self.data_changed.emit()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            from qfluentwidgets import MessageBox
+            w = MessageBox("发生错误", f"无法打开添加规则窗口：\n{e}", self.window())
+            w.yesButton.setText("知道了")
+            w.cancelButton.hide()
+            w.exec_()
+
+    def _on_del_rule(self) -> None:
+        rs = self._get_ruleset()
+        if not rs or self._current_group_index < 0 or self._current_rule_index < 0:
             return
-
-        dlg = RulePickerDialog(self.window() or self)
-        if dlg.exec_() != QDialog.Accepted or not dlg.selected_rule_id:
-            return
-
-        rule_id = dlg.selected_rule_id
-        settings_type = RULE_SETTINGS_TYPES.get(rule_id)
-        rule = Rule(
-            Id=rule_id,
-            IsReversed=False,
-            Settings=settings_type() if settings_type else None,
-        )
-        group.Rules.append(rule)
-        self._current_rule_index = len(group.Rules) - 1
-
-        self._reload_all()
-        self._emit_changed()
-        self._emit_target("rule", rule)
-
-    def _on_delete_rule(self) -> None:
-        group = self._current_group()
-        if group is None:
-            return
-
-        if not (0 <= self._current_rule_index < len(group.Rules)):
-            return
-
+        group = rs.Groups[self._current_group_index]
         group.Rules.pop(self._current_rule_index)
-        if not group.Rules:
-            group.Rules.append(Rule())
-
-        if self._current_rule_index >= len(group.Rules):
-            self._current_rule_index = len(group.Rules) - 1
-
-        self._reload_all()
-        self._emit_changed()
-
-        rule = self._current_rule()
-        if rule is not None and rule.Id:
-            self._emit_target("rule", rule)
-        else:
-            self._emit_target("rule_group", group)
+        self._current_rule_index = -1
+        self._reload_groups()
+        self._reload_rules()
+        self._update_ui_state()
+        self.data_changed.emit()
 
     def _on_rule_up(self) -> None:
-        group = self._current_group()
-        if group is None:
+        rs = self._get_ruleset()
+        if not rs or self._current_group_index < 0 or self._current_rule_index <= 0:
             return
-
+        group = rs.Groups[self._current_group_index]
         idx = self._current_rule_index
-        if idx <= 0:
-            return
-
         group.Rules[idx - 1], group.Rules[idx] = group.Rules[idx], group.Rules[idx - 1]
-        self._current_rule_index = idx - 1
-
-        self._reload_all()
-        self._emit_changed()
-        self._emit_target("rule", self._current_rule())
+        self._current_rule_index -= 1
+        self._reload_rules(select_current=True)
+        self.data_changed.emit()
 
     def _on_rule_down(self) -> None:
-        group = self._current_group()
-        if group is None:
+        rs = self._get_ruleset()
+        if not rs or self._current_group_index < 0:
             return
-
+        group = rs.Groups[self._current_group_index]
+        if self._current_rule_index < 0 or self._current_rule_index >= len(group.Rules) - 1:
+            return
         idx = self._current_rule_index
-        if idx < 0 or idx >= len(group.Rules) - 1:
-            return
-
         group.Rules[idx + 1], group.Rules[idx] = group.Rules[idx], group.Rules[idx + 1]
-        self._current_rule_index = idx + 1
+        self._current_rule_index += 1
+        self._reload_rules(select_current=True)
+        self.data_changed.emit()
 
-        self._reload_all()
-        self._emit_changed()
-        self._emit_target("rule", self._current_rule())
-
-    def _on_change_rule_type(self) -> None:
-        rule = self._current_rule()
-        if rule is None:
-            return
-
-        dlg = RulePickerDialog(self.window() or self)
-        if dlg.exec_() != QDialog.Accepted or not dlg.selected_rule_id:
-            return
-
-        rule_id = dlg.selected_rule_id
-        settings_type = RULE_SETTINGS_TYPES.get(rule_id)
-
-        rule.Id = rule_id
-        rule.Settings = settings_type() if settings_type else None
-
-        self._reload_all()
-        self._emit_changed()
-        self._emit_target("rule", rule)

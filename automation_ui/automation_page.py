@@ -31,13 +31,13 @@ from qfluentwidgets import (
     StrongBodyLabel,
     SubtitleLabel,
     TitleLabel,
+    isDarkTheme,
+    qconfig,
 )
-
 
 from .controller import AutomationUiController
 from .property_editor import AutomationPropertyEditor
 from .ruleset_editor import RulesetEditor
-
 
 TRIGGER_DESCRIPTIONS: dict[str, str] = {
     "classisland.lifetime.startup": (
@@ -113,7 +113,6 @@ TRIGGER_DESCRIPTIONS: dict[str, str] = {
     ),
 }
 
-
 ACTION_DESCRIPTIONS: dict[str, str] = {
     "classisland.showNotification": "显示 CW 风格提醒。注意：主提示与详细内容会同时显示，不是先标题再正文。",
     "classisland.notification.weather": "显示天气提醒，包括三天天气、天气预警、逐小时天气。",
@@ -126,58 +125,15 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
 }
 
 
-def _scroll_style() -> str:
-    return """
-    SmoothScrollArea, QAbstractScrollArea {
+def get_transparent_scroll_style(content_id: str) -> str:
+    return f"""
+    SmoothScrollArea, QAbstractScrollArea {{
         background: transparent;
         border: none;
-    }
-    QWidget#AutomationLeftScrollContent,
-    QWidget#AutomationRightScrollContent {
+    }}
+    QWidget#{content_id} {{
         background: transparent;
-    }
-
-    QScrollBar:vertical {
-        background: transparent;
-        width: 10px;
-        margin: 0px;
-    }
-    QScrollBar::handle:vertical {
-        background: rgba(0, 0, 0, 0.16);
-        min-height: 30px;
-        border-radius: 5px;
-    }
-    QScrollBar::add-line:vertical,
-    QScrollBar::sub-line:vertical {
-        height: 0px;
-        background: transparent;
-        border: none;
-    }
-    QScrollBar::add-page:vertical,
-    QScrollBar::sub-page:vertical {
-        background: transparent;
-    }
-
-    QScrollBar:horizontal {
-        background: transparent;
-        height: 10px;
-        margin: 0px;
-    }
-    QScrollBar::handle:horizontal {
-        background: rgba(0, 0, 0, 0.16);
-        min-width: 30px;
-        border-radius: 5px;
-    }
-    QScrollBar::add-line:horizontal,
-    QScrollBar::sub-line:horizontal {
-        width: 0px;
-        background: transparent;
-        border: none;
-    }
-    QScrollBar::add-page:horizontal,
-    QScrollBar::sub-page:horizontal {
-        background: transparent;
-    }
+    }}
     """
 
 
@@ -185,16 +141,31 @@ class CardFrame(QFrame):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("AutomationCardFrame")
-        self.setStyleSheet(
-            """
-            QFrame#AutomationCardFrame {
-                background: rgba(255, 255, 255, 0.82);
-                border: 1px solid rgba(0, 0, 0, 0.035);
-                border-radius: 12px;
-            }
-            """
-        )
+        self._update_style()
+        qconfig.themeChanged.connect(self._update_style)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+    def _update_style(self):
+        if isDarkTheme():
+            self.setStyleSheet(
+                """
+                QFrame#AutomationCardFrame {
+                    background: rgba(255, 255, 255, 0.045);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 12px;
+                }
+                """
+            )
+        else:
+            self.setStyleSheet(
+                """
+                QFrame#AutomationCardFrame {
+                    background: rgba(255, 255, 255, 0.82);
+                    border: 1px solid rgba(0, 0, 0, 0.035);
+                    border-radius: 12px;
+                }
+                """
+            )
 
 
 class SectionHeader(QWidget):
@@ -210,28 +181,20 @@ class SectionHeader(QWidget):
 
         self.desc_label = CaptionLabel(desc)
         self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet("color: #666;")
         self.desc_label.setVisible(bool(desc))
         layout.addWidget(self.desc_label)
 
 
 class AutomationTextFieldDialog(MessageBoxBase):
-    """
-    自动化配置名输入框。
-
-    注意：
-    - 这里必须继承 MessageBoxBase，而不是 Dialog。
-    - parent 需要传完整 SettingsMenu，即 AutomationSettingsPage.window()。
-    - 这样遮罩、弹出动效、暗色背景才和设置页其它 MessageBox 一致。
-    """
+    """自动化配置名输入框"""
 
     def __init__(
-        self,
-        parent=None,
-        title: str = "标题",
-        text: str = "请输入内容",
-        placeholder: str = "",
-        validator=None,
+            self,
+            parent=None,
+            title: str = "标题",
+            text: str = "请输入内容",
+            placeholder: str = "",
+            validator=None,
     ) -> None:
         super().__init__(parent)
         self._validator = validator
@@ -246,14 +209,12 @@ class AutomationTextFieldDialog(MessageBoxBase):
 
         self.tipLabel = CaptionLabel("", self)
         self.tipLabel.setWordWrap(True)
-        self.tipLabel.setStyleSheet("color: #666;")
 
         self.viewLayout.addWidget(self.titleLabel)
         self.viewLayout.addWidget(self.contentLabel)
         self.viewLayout.addWidget(self.textField)
         self.viewLayout.addWidget(self.tipLabel)
 
-        # 尺寸参考 menu.py 里的 CustomMessageBox，不要做特殊居中/特殊动效。
         self.widget.setMinimumWidth(350)
 
         self.yesButton.setText("确定")
@@ -272,10 +233,14 @@ class AutomationTextFieldDialog(MessageBoxBase):
             self.yesButton.click()
 
     def _on_text_changed(self, text: str) -> None:
+        is_dark = isDarkTheme()
+        color_err = "#ff99a4" if is_dark else "#c42b1c"
+        color_ok = "#66cc66" if is_dark else "#0f7b0f"
+
         text = (text or "").strip()
 
         if not text:
-            self.tipLabel.setStyleSheet("color: #c42b1c;")
+            self.tipLabel.setStyleSheet(f"color: {color_err};")
             self.tipLabel.setText("名称不能为空。")
             self.yesButton.setEnabled(False)
             return
@@ -283,93 +248,12 @@ class AutomationTextFieldDialog(MessageBoxBase):
         if self._validator is not None:
             ok, message = self._validator(text)
             if not ok:
-                self.tipLabel.setStyleSheet("color: #c42b1c;")
+                self.tipLabel.setStyleSheet(f"color: {color_err};")
                 self.tipLabel.setText(message)
                 self.yesButton.setEnabled(False)
                 return
 
-        self.tipLabel.setStyleSheet("color: #0f7b0f;")
-        self.tipLabel.setText("可以使用这个名称。")
-        self.yesButton.setEnabled(True)
-
-    def text(self) -> str:
-        return self.textField.text().strip()
-
-
-class AutomationTextFieldDialog(MessageBoxBase):
-    """
-    自动化配置名输入框。
-
-    注意：
-    - 这里必须继承 MessageBoxBase，而不是 Dialog。
-    - parent 需要传完整 SettingsMenu，即 AutomationSettingsPage.window()。
-    - 这样遮罩、弹出动效、暗色背景才和设置页其它 MessageBox 一致。
-    """
-
-    def __init__(
-        self,
-        parent=None,
-        title: str = "标题",
-        text: str = "请输入内容",
-        placeholder: str = "",
-        validator=None,
-    ) -> None:
-        super().__init__(parent)
-        self._validator = validator
-
-        self.titleLabel = SubtitleLabel(title, self)
-        self.contentLabel = BodyLabel(text, self)
-        self.contentLabel.setWordWrap(True)
-
-        self.textField = LineEdit(self)
-        self.textField.setPlaceholderText(placeholder)
-        self.textField.setClearButtonEnabled(True)
-
-        self.tipLabel = CaptionLabel("", self)
-        self.tipLabel.setWordWrap(True)
-        self.tipLabel.setStyleSheet("color: #666;")
-
-        self.viewLayout.addWidget(self.titleLabel)
-        self.viewLayout.addWidget(self.contentLabel)
-        self.viewLayout.addWidget(self.textField)
-        self.viewLayout.addWidget(self.tipLabel)
-
-        # 尺寸参考 menu.py 里的 CustomMessageBox，不要做特殊居中/特殊动效。
-        self.widget.setMinimumWidth(350)
-
-        self.yesButton.setText("确定")
-        self.cancelButton.setText("取消")
-        self.yesButton.setEnabled(False)
-
-        self.textField.textChanged.connect(self._on_text_changed)
-        self.textField.returnPressed.connect(self._on_return_pressed)
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        QTimer.singleShot(0, self.textField.setFocus)
-
-    def _on_return_pressed(self) -> None:
-        if self.yesButton.isEnabled():
-            self.yesButton.click()
-
-    def _on_text_changed(self, text: str) -> None:
-        text = (text or "").strip()
-
-        if not text:
-            self.tipLabel.setStyleSheet("color: #c42b1c;")
-            self.tipLabel.setText("名称不能为空。")
-            self.yesButton.setEnabled(False)
-            return
-
-        if self._validator is not None:
-            ok, message = self._validator(text)
-            if not ok:
-                self.tipLabel.setStyleSheet("color: #c42b1c;")
-                self.tipLabel.setText(message)
-                self.yesButton.setEnabled(False)
-                return
-
-        self.tipLabel.setStyleSheet("color: #0f7b0f;")
+        self.tipLabel.setStyleSheet(f"color: {color_ok};")
         self.tipLabel.setText("可以使用这个名称。")
         self.yesButton.setEnabled(True)
 
@@ -379,15 +263,20 @@ class AutomationTextFieldDialog(MessageBoxBase):
 
 class GroupedPickerDialog(QDialog):
     def __init__(
-        self,
-        title: str,
-        groups: dict[str, list[tuple[str, str]]],
-        item_descriptions: dict[str, str] | None = None,
-        parent=None,
+            self,
+            title: str,
+            groups: dict[str, list[tuple[str, str]]],
+            item_descriptions: dict[str, str] | None = None,
+            parent=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         self.resize(760, 500)
+
+        # 增加这两行用于适配深色模式
+        self._update_style()
+        qconfig.themeChanged.connect(self._update_style)
+
         self.selected_id: str | None = None
         self._groups = groups
         self._descriptions = item_descriptions or {}
@@ -401,7 +290,6 @@ class GroupedPickerDialog(QDialog):
 
         desc = CaptionLabel("请先选择左侧分组，再选择右侧条目。")
         desc.setWordWrap(True)
-        desc.setStyleSheet("color: #666;")
         root.addWidget(desc)
 
         splitter = QSplitter(Qt.Horizontal)
@@ -435,7 +323,7 @@ class GroupedPickerDialog(QDialog):
 
         self.desc_card = CardFrame()
         self.desc_card.setMinimumHeight(120)
-        self.desc_card.setMaximumHeight(300)
+        self.desc_card.setMaximumHeight(260)
 
         desc_layout = QVBoxLayout(self.desc_card)
         desc_layout.setContentsMargins(12, 10, 12, 10)
@@ -447,15 +335,8 @@ class GroupedPickerDialog(QDialog):
         self.desc_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.desc_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.desc_scroll.setMinimumHeight(80)
-        self.desc_scroll.setMaximumHeight(250)
-        self.desc_scroll.setStyleSheet(
-            _scroll_style()
-            + """
-            QWidget#AutomationPickerDescScrollContent {
-                background: transparent;
-            }
-            """
-        )
+        self.desc_scroll.setMaximumHeight(210)
+        self.desc_scroll.setStyleSheet(get_transparent_scroll_style("AutomationPickerDescScrollContent"))
 
         self.desc_scroll_content = QWidget()
         self.desc_scroll_content.setObjectName("AutomationPickerDescScrollContent")
@@ -469,7 +350,7 @@ class GroupedPickerDialog(QDialog):
         self.desc_label.setWordWrap(True)
         self.desc_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.desc_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.desc_label.setStyleSheet("color: #444; background: transparent;")
+        self.desc_label.setStyleSheet("background: transparent;")
 
         desc_scroll_layout.addWidget(self.desc_label)
         desc_scroll_layout.addStretch(1)
@@ -498,6 +379,12 @@ class GroupedPickerDialog(QDialog):
         if self.group_list.count() > 0:
             self.group_list.setCurrentRow(0)
 
+    def _update_style(self):
+        if isDarkTheme():
+            self.setStyleSheet("QDialog { background: #202020; } QLabel { color: white; }")
+        else:
+            self.setStyleSheet("QDialog { background: #f3f3f3; } QLabel { color: black; }")
+
     def _set_description_text(self, text: str) -> None:
         self.desc_label.setText(text)
         QTimer.singleShot(0, self._scroll_description_to_top)
@@ -516,11 +403,7 @@ class GroupedPickerDialog(QDialog):
         if row < 0:
             return
 
-        group_item = self.group_list.item(row)
-        if group_item is None:
-            return
-
-        group_name = group_item.text()
+        group_name = self.group_list.item(row).text()
         items = self._groups.get(group_name, [])
 
         for item_id, display_name in items:
@@ -581,46 +464,15 @@ class AutomationSettingsPage(QWidget):
         self._set_status_info(self._build_idle_status_text())
 
         QTimer.singleShot(0, self._apply_initial_sizes)
+        qconfig.themeChanged.connect(self._apply_status_style)
 
     # =========================================================
     # MessageBox / Flyout helpers
     # =========================================================
 
     def _dialog_host(self) -> QWidget:
-        """
-        自动化页是 SettingsMenu 内部的一个子页面。
-
-        普通设置页里调用 MessageBox 时，parent 通常是 SettingsMenu 自己；
-        但这里的 self 是 AutomationSettingsPage。
-        如果 parent 传 self，黑色遮罩和弹出动效只会覆盖自动化子页，
-        视觉上就和其它设置页不一致。
-
-        所以这里统一返回完整设置窗口 self.window()。
-        """
         host = self.window()
         return host if host is not None else self
-
-    def _center_window_dialog(self, dialog: QWidget) -> None:
-        """
-        只给普通 QDialog 使用，例如添加触发器/动作的选择器。
-
-        MessageBox / MessageBoxBase 不要手动居中。
-        它们要使用 qfluentwidgets 自带的遮罩和动画。
-        """
-        host = self._dialog_host()
-
-        try:
-            dialog.adjustSize()
-        except Exception:
-            pass
-
-        try:
-            host_geo = host.frameGeometry() if host.isWindow() else host.geometry()
-            geo = dialog.frameGeometry()
-            geo.moveCenter(host_geo.center())
-            dialog.move(geo.topLeft())
-        except Exception:
-            pass
 
     def _exec_dialog(self, dialog) -> int:
         if hasattr(dialog, "exec"):
@@ -628,55 +480,37 @@ class AutomationSettingsPage(QWidget):
         return dialog.exec_()
 
     def _show_info_dialog(self, title: str, content: str) -> None:
-        """
-        和设置页“什么是灵活隐藏？”保持同款 MessageBox 效果。
-        """
         w = MessageBox(title, content, self._dialog_host())
         w.yesButton.setText("知道了")
         w.cancelButton.hide()
         self._exec_dialog(w)
 
     def _show_error_dialog(self, title: str, content: str) -> None:
-        """
-        错误提示也使用设置页统一 MessageBox。
-        """
         w = MessageBox(title, content, self._dialog_host())
         w.yesButton.setText("知道了")
         w.cancelButton.hide()
         self._exec_dialog(w)
 
     def _ask_confirm(
-        self,
-        title: str,
-        content: str,
-        yes_text: str = "确定",
-        cancel_text: str = "取消",
+            self,
+            title: str,
+            content: str,
+            yes_text: str = "确定",
+            cancel_text: str = "取消",
     ) -> bool:
-        """
-        确认弹窗统一使用 qfluentwidgets.MessageBox。
-
-        不使用 Dialog。
-        不使用自动化页专属样式。
-        parent 必须是完整 SettingsMenu。
-        """
         w = MessageBox(title, content, self._dialog_host())
         w.yesButton.setText(yes_text)
         w.cancelButton.setText(cancel_text)
         return bool(self._exec_dialog(w))
 
     def _show_tip_flyout(
-        self,
-        title: str,
-        content: str,
-        target: QWidget | None = None,
-        icon=InfoBarIcon.INFORMATION,
+            self,
+            title: str,
+            content: str,
+            target: QWidget | None = None,
+            icon=InfoBarIcon.INFORMATION,
     ) -> None:
-        """
-        保存成功、测试已开始等轻量提示使用设置页常用 Flyout。
-        注意 parent 同样使用完整设置窗口，保证视觉层级一致。
-        """
         target = target or self.status_card
-
         try:
             Flyout.create(
                 icon=icon,
@@ -689,40 +523,6 @@ class AutomationSettingsPage(QWidget):
             )
         except Exception:
             self._set_status_info(f"{title}：{content}")
-
-
-    def _show_tip_flyout(
-        self,
-        title: str,
-        content: str,
-        target: QWidget | None = None,
-        icon=InfoBarIcon.INFORMATION,
-    ) -> None:
-        """
-        统一设置页 Flyout 风格。
-        保存 / 应用 / 测试这类轻量反馈不再弹模态框，和其它设置页保持一致。
-        """
-        target = target or self.status_card
-        parent = self._dialog_host()
-
-        try:
-            flyout = Flyout.create(
-                icon=icon,
-                title=title,
-                content=content,
-                target=target,
-                parent=parent,
-                isClosable=True,
-                aniType=FlyoutAnimationType.PULL_UP,
-            )
-            try:
-                flyout.setFocusPolicy(Qt.NoFocus)
-            except Exception:
-                pass
-        except Exception:
-            # Flyout 创建失败时至少不要丢反馈
-            self._set_status_info(f"{title}：{content}")
-
 
     # =========================================================
     # Main UI
@@ -738,7 +538,6 @@ class AutomationSettingsPage(QWidget):
 
         self.subtitle_label = CaptionLabel('通过“触发器 + 条件 + 动作”的方式，让应用在不同场景下自动执行任务。')
         self.subtitle_label.setWordWrap(True)
-        self.subtitle_label.setStyleSheet("color: #666;")
         root.addWidget(self.subtitle_label)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
@@ -749,7 +548,7 @@ class AutomationSettingsPage(QWidget):
         root.addWidget(self.main_splitter, 1)
 
         self.left_scroll = SmoothScrollArea()
-        self.left_scroll.setStyleSheet(_scroll_style())
+        self.left_scroll.setStyleSheet(get_transparent_scroll_style("AutomationLeftScrollContent"))
         self.left_scroll.setWidgetResizable(True)
         self.main_splitter.addWidget(self.left_scroll)
 
@@ -777,7 +576,6 @@ class AutomationSettingsPage(QWidget):
 
         self.enable_hint = CaptionLabel("建议只在你已经配置好至少一个工作流后再开启。")
         self.enable_hint.setWordWrap(True)
-        self.enable_hint.setStyleSheet("color: #666;")
         enable_layout.addWidget(self.enable_hint)
         left_layout.addWidget(self.enable_card)
 
@@ -823,7 +621,6 @@ class AutomationSettingsPage(QWidget):
 
         self.config_info_label = BodyLabel("")
         self.config_info_label.setWordWrap(True)
-        self.config_info_label.setStyleSheet("color: #444;")
         config_layout.addWidget(self.config_info_label)
 
         left_layout.addWidget(self.config_card)
@@ -856,7 +653,7 @@ class AutomationSettingsPage(QWidget):
         left_layout.addStretch(1)
 
         self.right_scroll = SmoothScrollArea()
-        self.right_scroll.setStyleSheet(_scroll_style())
+        self.right_scroll.setStyleSheet(get_transparent_scroll_style("AutomationRightScrollContent"))
         self.right_scroll.setWidgetResizable(True)
         self.main_splitter.addWidget(self.right_scroll)
 
@@ -906,7 +703,6 @@ class AutomationSettingsPage(QWidget):
 
         self.workflow_tip = CaptionLabel("先选中工作流，再在下面继续配置它的触发器、条件和动作。")
         self.workflow_tip.setWordWrap(True)
-        self.workflow_tip.setStyleSheet("color: #666;")
         workflow_layout.addWidget(self.workflow_tip)
         right_layout.addWidget(self.workflow_card)
 
@@ -921,11 +717,8 @@ class AutomationSettingsPage(QWidget):
         self.trigger_list.setMinimumHeight(120)
         trigger_layout.addWidget(self.trigger_list)
 
-        self.trigger_tip = CaptionLabel(
-            "常见示例：上课前提醒、Cron 定时执行、托盘菜单手动触发、应用内 URI 调用。"
-        )
+        self.trigger_tip = CaptionLabel("常见示例：上课前提醒、Cron 定时执行、托盘菜单手动触发、应用内 URI 调用。")
         self.trigger_tip.setWordWrap(True)
-        self.trigger_tip.setStyleSheet("color: #666;")
         trigger_layout.addWidget(self.trigger_tip)
 
         trigger_btns = QHBoxLayout()
@@ -976,7 +769,6 @@ class AutomationSettingsPage(QWidget):
 
         self.action_tip = CaptionLabel("常见示例：显示提醒、运行程序、等待时长、广播信号。")
         self.action_tip.setWordWrap(True)
-        self.action_tip.setStyleSheet("color: #666;")
         action_layout.addWidget(self.action_tip)
 
         action_btns = QHBoxLayout()
@@ -1027,9 +819,7 @@ class AutomationSettingsPage(QWidget):
             "如果动作中包含运行程序、修改设置、退出或重启，它们都会真实执行。"
         )
         self.action_test_tip.setWordWrap(True)
-        self.action_test_tip.setStyleSheet("color: #8a5a00;")
         action_layout.addWidget(self.action_test_tip)
-
 
         right_layout.addWidget(self.action_card)
         right_layout.addStretch(1)
@@ -1053,7 +843,27 @@ class AutomationSettingsPage(QWidget):
     # Status
     # =========================================================
 
-    def _set_status_style(self, fg: str, bg: str) -> None:
+    def _set_status_style(self, type_: str) -> None:
+        self._current_status_type = type_
+        self._apply_status_style()
+
+    def _apply_status_style(self) -> None:
+        is_dark = isDarkTheme()
+        type_ = getattr(self, "_current_status_type", "normal")
+
+        if type_ == "saved":
+            fg = "#ffcc00" if is_dark else "#8a5a00"
+            bg = "rgba(255, 170, 0, 0.12)" if is_dark else "rgba(255, 170, 0, 0.10)"
+        elif type_ == "applied":
+            fg = "#66ff66" if is_dark else "#1e6b34"
+            bg = "rgba(46, 204, 113, 0.12)" if is_dark else "rgba(46, 204, 113, 0.10)"
+        elif type_ == "error":
+            fg = "#ff8080" if is_dark else "#8b1e1e"
+            bg = "rgba(255, 0, 0, 0.20)" if is_dark else "rgba(255, 0, 0, 0.08)"
+        else:  # info
+            fg = "#66ccff" if is_dark else "#1f4e79"
+            bg = "rgba(0, 120, 215, 0.12)" if is_dark else "rgba(0, 120, 215, 0.08)"
+
         self.status_card.setObjectName("AutomationStatusCard")
         self.status_card.setStyleSheet(
             f"""
@@ -1076,7 +886,7 @@ class AutomationSettingsPage(QWidget):
 
     def _set_status_info(self, text: str) -> None:
         self.status_label.setText(text)
-        self._set_status_style("#1f4e79", "rgba(0, 120, 215, 0.08)")
+        self._set_status_style("info")
 
     def _set_status_saved(self, text: str | None = None) -> None:
         if text is None:
@@ -1085,17 +895,17 @@ class AutomationSettingsPage(QWidget):
             else:
                 text = "已保存到文件。"
         self.status_label.setText(text)
-        self._set_status_style("#8a5a00", "rgba(255, 170, 0, 0.10)")
+        self._set_status_style("saved")
 
     def _set_status_applied(self, text: str | None = None) -> None:
         if text is None:
             text = "已应用到当前运行时。"
         self.status_label.setText(text)
-        self._set_status_style("#1e6b34", "rgba(46, 204, 113, 0.10)")
+        self._set_status_style("applied")
 
     def _set_status_error(self, text: str) -> None:
         self.status_label.setText(text)
-        self._set_status_style("#8b1e1e", "rgba(255, 0, 0, 0.08)")
+        self._set_status_style("error")
 
     def _build_idle_status_text(self) -> str:
         name = self.controller.get_current_config_name()
@@ -1117,178 +927,68 @@ class AutomationSettingsPage(QWidget):
     # =========================================================
 
     def _connect_signals(self) -> None:
-        self.reload_btn.clicked.connect(self._on_reload)
-        self.save_btn.clicked.connect(self._on_save)
-        self.apply_btn.clicked.connect(self._on_apply)
+        self.enable_box.stateChanged.connect(self._on_enable_changed)
+        self.config_combo.currentIndexChanged.connect(self._on_config_combo_changed)
+
         self.new_config_btn.clicked.connect(self._on_new_config)
         self.delete_config_btn.clicked.connect(self._on_delete_config)
 
-        self.enable_box.toggled.connect(self._on_global_enabled_changed)
+        self.reload_btn.clicked.connect(self._on_reload)
+        self.save_btn.clicked.connect(self._on_save)
+        self.apply_btn.clicked.connect(self._on_apply)
 
         self.new_workflow_btn.clicked.connect(self._on_new_workflow)
         self.delete_workflow_btn.clicked.connect(self._on_delete_workflow)
         self.workflow_up_btn.clicked.connect(self._on_workflow_up)
         self.workflow_down_btn.clicked.connect(self._on_workflow_down)
 
+        self.workflow_list.currentRowChanged.connect(self._on_workflow_selection_changed)
+
         self.add_trigger_btn.clicked.connect(self._on_add_trigger)
         self.del_trigger_btn.clicked.connect(self._on_delete_trigger)
         self.trigger_up_btn.clicked.connect(self._on_trigger_up)
         self.trigger_down_btn.clicked.connect(self._on_trigger_down)
 
+        self.trigger_list.currentRowChanged.connect(self._on_trigger_selection_changed)
+
         self.add_action_btn.clicked.connect(self._on_add_action)
         self.del_action_btn.clicked.connect(self._on_delete_action)
         self.action_up_btn.clicked.connect(self._on_action_up)
         self.action_down_btn.clicked.connect(self._on_action_down)
+
+        self.action_list.currentRowChanged.connect(self._on_action_selection_changed)
+
         self.test_action_invoke_btn.clicked.connect(self._on_test_invoke_actions)
         self.test_action_revert_btn.clicked.connect(self._on_test_revert_actions)
 
-
-        self.workflow_list.currentRowChanged.connect(self._on_workflow_selected)
-        self.trigger_list.currentRowChanged.connect(self._on_trigger_selected)
-        self.action_list.currentRowChanged.connect(self._on_action_selected)
-
         self.property_editor.changed.connect(self._on_property_changed)
-        self.rules_editor.changed.connect(self._on_ruleset_changed)
-        self.rules_editor.targetChanged.connect(self._on_ruleset_target_changed)
-        self.config_combo.currentIndexChanged.connect(self._on_config_changed)
+
+        self.rules_editor.rule_selection_changed.connect(self._on_rule_selection_changed)
+        self.rules_editor.data_changed.connect(self._on_ruleset_changed)
 
     # =========================================================
-    # Reload
+    # Current helpers
     # =========================================================
-
-    def _reload_all(self) -> None:
-        self._reload_configs()
-        self._reload_workflows()
-        self._reload_global_state()
-        self._update_config_info()
-
-    def _reload_global_state(self) -> None:
-        settings = self.controller.runtime.context.settings
-        enabled = bool(getattr(settings, "IsAutomationEnabled", True))
-        self.enable_box.blockSignals(True)
-        self.enable_box.setChecked(enabled)
-        self.enable_box.blockSignals(False)
-
-    def _reload_configs(self) -> None:
-        self.config_combo.blockSignals(True)
-        self.config_combo.clear()
-
-        configs = self.controller.list_configs()
-        if not configs:
-            self.controller.ensure_default_config()
-            configs = self.controller.list_configs()
-
-        current = self.controller.get_current_config_name()
-        for name in configs:
-            self.config_combo.addItem(name)
-
-        idx = self.config_combo.findText(current)
-        self.config_combo.setCurrentIndex(max(0, idx))
-        self.config_combo.blockSignals(False)
-
-    def _reload_workflows(self) -> None:
-        self.workflow_list.clear()
-
-        for workflow in self.controller.workflows:
-            self.workflow_list.addItem(
-                QListWidgetItem(self.controller.workflow_display_text(workflow))
-            )
-
-        if self.controller.workflows:
-            if self._current_workflow_index < 0:
-                self._current_workflow_index = 0
-
-            self._current_workflow_index = min(
-                self._current_workflow_index,
-                len(self.controller.workflows) - 1,
-            )
-            self.workflow_list.setCurrentRow(self._current_workflow_index)
-        else:
-            self._current_workflow_index = -1
-            self._current_trigger_index = -1
-            self._current_action_index = -1
-
-            self.trigger_list.clear()
-            self.action_list.clear()
-            self.rules_editor.set_workflow(None)
-            self.property_editor.set_target(None, None)
-
-        self._update_config_info()
-        self._update_action_test_buttons()
-
-
-    def _reload_middle(self) -> None:
-        self.trigger_list.clear()
-        self.action_list.clear()
-
-        workflow = self._get_current_workflow()
-        if workflow is None:
-            self.rules_editor.set_workflow(None)
-            self.property_editor.set_target(None, None)
-            self._update_config_info()
-            self._update_action_test_buttons()
-            return
-
-        for trigger in workflow.Triggers:
-            self.trigger_list.addItem(
-                QListWidgetItem(self.controller.trigger_display_text(trigger))
-            )
-
-        for action in workflow.ActionSet.Actions:
-            self.action_list.addItem(
-                QListWidgetItem(self.controller.action_display_text(action))
-            )
-
-        self.rules_editor.set_workflow(workflow)
-
-        if self._current_trigger_index >= 0:
-            self.property_editor.set_target("trigger", self._get_current_trigger())
-        elif self._current_action_index >= 0:
-            self.property_editor.set_target("action", self._get_current_action())
-        else:
-            self.property_editor.set_target("workflow", workflow)
-
-        self._update_config_info()
-        self._update_action_test_buttons()
-
-    def _refresh_summary_texts_only(self) -> None:
-        for i, workflow in enumerate(self.controller.workflows):
-            item = self.workflow_list.item(i)
-            if item is not None:
-                item.setText(self.controller.workflow_display_text(workflow))
-
-        workflow = self._get_current_workflow()
-        if workflow is None:
-            self.rules_editor.refresh_display_texts()
-            self._update_config_info()
-            return
-
-        for i, trigger in enumerate(workflow.Triggers):
-            item = self.trigger_list.item(i)
-            if item is not None:
-                item.setText(self.controller.trigger_display_text(trigger))
-
-        for i, action in enumerate(workflow.ActionSet.Actions):
-            item = self.action_list.item(i)
-            if item is not None:
-                item.setText(self.controller.action_display_text(action))
-
-        self.rules_editor.refresh_display_texts()
-        self._update_config_info()
 
     def _update_action_test_buttons(self) -> None:
         workflow = self._get_current_workflow()
         has_actions = (
-            workflow is not None
-            and workflow.ActionSet is not None
-            and bool(workflow.ActionSet.Actions)
+                workflow is not None
+                and workflow.ActionSet is not None
+                and bool(workflow.ActionSet.Actions)
         )
-        can_test = bool(has_actions and self.controller.can_test_actions())
+
+        try:
+            can_test_runtime = self.controller.can_test_actions()
+        except Exception:
+            can_test_runtime = False
+
+        can_test = bool(has_actions and can_test_runtime)
 
         self.test_action_invoke_btn.setEnabled(can_test)
         self.test_action_revert_btn.setEnabled(can_test)
 
-        if not self.controller.can_test_actions():
+        if not can_test_runtime:
             tip = "当前没有连接到运行中的自动化服务，无法测试动作。"
         elif not has_actions:
             tip = "请先选择一个包含动作的工作流。"
@@ -1298,68 +998,69 @@ class AutomationSettingsPage(QWidget):
         self.test_action_invoke_btn.setToolTip(tip)
         self.test_action_revert_btn.setToolTip(tip)
 
-    # =========================================================
-    # Current helpers
-    # =========================================================
-
-    def _get_current_workflow(self):
+    def _get_current_workflow(self) -> Any | None:
         if 0 <= self._current_workflow_index < len(self.controller.workflows):
             return self.controller.workflows[self._current_workflow_index]
         return None
 
-    def _get_current_trigger(self):
-        workflow = self._get_current_workflow()
-        if workflow is None:
-            return None
-        if 0 <= self._current_trigger_index < len(workflow.Triggers):
-            return workflow.Triggers[self._current_trigger_index]
+    def _get_current_trigger(self) -> Any | None:
+        wf = self._get_current_workflow()
+        if wf and 0 <= self._current_trigger_index < len(wf.Triggers):
+            return wf.Triggers[self._current_trigger_index]
         return None
 
-    def _get_current_action(self):
-        workflow = self._get_current_workflow()
-        if workflow is None:
-            return None
-        if 0 <= self._current_action_index < len(workflow.ActionSet.Actions):
-            return workflow.ActionSet.Actions[self._current_action_index]
-        return None
-
-    def _clear_trigger_action_selection(self) -> None:
-        self._current_trigger_index = -1
-        self._current_action_index = -1
-
-        self.trigger_list.blockSignals(True)
-        self.trigger_list.clearSelection()
-        self.trigger_list.setCurrentRow(-1)
-        self.trigger_list.blockSignals(False)
-
-        self.action_list.blockSignals(True)
-        self.action_list.clearSelection()
-        self.action_list.setCurrentRow(-1)
-        self.action_list.blockSignals(False)
-
-    # =========================================================
-    # Picker dialogs
-    # =========================================================
-
-    def _pick_trigger_id(self) -> str | None:
-        groups = self.controller.available_trigger_groups()
-        dlg = GroupedPickerDialog("添加触发器", groups, TRIGGER_DESCRIPTIONS, self._dialog_host())
-        self._center_window_dialog(dlg)
-        if self._exec_dialog(dlg) == QDialog.Accepted:
-            return dlg.selected_id
-        return None
-
-    def _pick_action_id(self) -> str | None:
-        groups = self.controller.available_action_groups()
-        dlg = GroupedPickerDialog("添加动作", groups, ACTION_DESCRIPTIONS, self._dialog_host())
-        self._center_window_dialog(dlg)
-        if self._exec_dialog(dlg) == QDialog.Accepted:
-            return dlg.selected_id
+    def _get_current_action(self) -> Any | None:
+        wf = self._get_current_workflow()
+        if wf and 0 <= self._current_action_index < len(wf.ActionSet.Actions):
+            return wf.ActionSet.Actions[self._current_action_index]
         return None
 
     # =========================================================
-    # Config actions
+    # Global Config
     # =========================================================
+
+    def _reload_all(self) -> None:
+        self.enable_box.blockSignals(True)
+        self.enable_box.setChecked(self.controller.is_automation_enabled())
+        self.enable_box.blockSignals(False)
+
+        self.config_combo.blockSignals(True)
+        self.config_combo.clear()
+        configs = self.controller.list_configs()
+        current = self.controller.get_current_config_name()
+
+        for c in configs:
+            self.config_combo.addItem(c)
+
+        idx = self.config_combo.findText(current)
+        if idx >= 0:
+            self.config_combo.setCurrentIndex(idx)
+        self.config_combo.blockSignals(False)
+
+        self._reload_workflows()
+
+    def _on_enable_changed(self) -> None:
+        is_enabled = self.enable_box.isChecked()
+        self.controller.set_automation_enabled(is_enabled)
+        self._set_status_saved(f"自动化已{'启用' if is_enabled else '禁用'}，记得保存并应用。")
+
+    def _on_config_combo_changed(self, idx: int) -> None:
+        if idx < 0:
+            return
+        name = self.config_combo.itemText(idx)
+        try:
+            # 修复：正确调用 controller 的切换配置接口
+            self.controller.set_current_config_name(name)
+            self.controller.load_current()
+
+            self._current_workflow_index = -1
+            self._current_trigger_index = -1
+            self._current_action_index = -1
+            self._reload_all()
+            self._set_status_info(self._build_idle_status_text())
+        except Exception as e:
+            self._set_status_error(f"切换配置失败：{e}")
+            self._show_error_dialog("自动化", f"切换配置失败：\n{e}")
 
     def _on_new_config(self) -> None:
         try:
@@ -1405,45 +1106,26 @@ class AutomationSettingsPage(QWidget):
         try:
             current = self.controller.get_current_config_name()
             if not self._ask_confirm(
-                "删除配置",
-                f"确定要删除配置文件“{current}”吗？\n\n删除后无法恢复。",
-                yes_text="删除",
-                cancel_text="取消",
+                    "删除配置",
+                    f"确定要删除配置文件“{current}”吗？\n删除后将不可恢复！",
             ):
                 return
 
-            next_name = self.controller.delete_config(current)
-            self._reload_all()
-            idx = self.config_combo.findText(next_name)
-            if idx >= 0:
-                self.config_combo.setCurrentIndex(idx)
+            if self.controller.delete_config(current):
+                self._reload_all()
+                self._set_status_saved(f"已删除配置：{current}。")
+            else:
+                self._show_error_dialog("自动化", "无法删除，这可能是最后一个配置文件。")
 
-            self._set_status_saved(f"已删除配置：{current}。当前切换到：{next_name}。")
         except Exception as e:
             self._set_status_error(f"删除配置失败：{e}")
             self._show_error_dialog("自动化", f"删除配置失败：\n{e}")
 
-    def _on_global_enabled_changed(self, state: bool) -> None:
-        try:
-            settings = self.controller.runtime.context.settings
-            if hasattr(settings, "IsAutomationEnabled"):
-                settings.IsAutomationEnabled = bool(state)
-            self.controller.save_current()
-            self._set_status_saved('已修改“启用自动化”状态，并保存到文件。若要影响当前会话，请点击“应用到运行时”。')
-        except Exception as e:
-            self._set_status_error(f"修改启用状态失败：{e}")
-            self._show_error_dialog("自动化", f"修改启用状态失败：\n{e}")
-
     def _on_reload(self) -> None:
         try:
             self.controller.load_current()
-            self._current_trigger_index = -1
-            self._current_action_index = -1
             self._reload_all()
-            self._set_status_info(
-                f"已从文件重载配置：{self.controller.get_current_config_name()}。"
-                + (" 如需影响当前会话，请点击“应用到运行时”。" if self.controller.has_live_runtime() else "")
-            )
+            self._set_status_info("已重新加载当前文件配置。")
         except Exception as e:
             self._set_status_error(f"重载配置失败：{e}")
             self._show_error_dialog("自动化", f"重载配置失败：\n{e}")
@@ -1467,122 +1149,171 @@ class AutomationSettingsPage(QWidget):
         try:
             config_name = self.controller.get_current_config_name()
             wf_count = len(self.controller.workflows)
-
             if self.controller.has_live_runtime():
                 if not self._ask_confirm(
-                        "应用到运行时",
-                        f"将使用当前配置文件“{config_name}”中的 {wf_count} 个工作流替换当前运行时。\n\n"
+                        "保存并应用到运行时",
+                        f"将自动保存当前配置，并使用“{config_name}”中的 {wf_count} 个工作流替换当前运行时。\n\n"
                         "这不会合并旧工作流，而是整体重载。\n\n"
                         "是否继续？",
-                        yes_text="继续",
+                        yes_text="保存并应用",
                         cancel_text="取消",
                 ):
                     return
-
+            # 先确保强行同步内存到文件
             self.controller.save_current()
+
+            # 再调用应用方法（底层也会再保存一次以防万一）
             applied = self.controller.apply_current()
             self._update_config_info()
-
+            # 获取真实写入的文件名和路径
+            save_path = self.controller.get_current_config_path().absolute()
             if applied:
                 self._set_status_applied(
-                    f"已应用到当前运行时：{config_name}（{wf_count} 个工作流）。"
+                    f"已保存到文件并应用：{config_name}（{wf_count} 个工作流）。"
                 )
-                self._show_info_dialog("自动化", "已应用到当前运行时。")
+                # 使用最稳的 InfoDialog 直接居中弹窗汇报结果！
+                self._show_info_dialog(
+                    "保存并应用成功",
+                    f"配置已实际写入此路径：\n\n{save_path}\n\n并且当前会话已重载生效。"
+                )
             else:
                 self._set_status_saved("当前没有可应用的运行时，已仅保存到文件。")
-                self._show_info_dialog("自动化", "当前没有可应用的运行时，仅保存到了文件。")
-
+                self._show_info_dialog(
+                    "仅保存到文件",
+                    f"当前没有可应用的运行时，配置已写入此路径：\n\n{save_path}"
+                )
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self._set_status_error(f"应用到运行时失败：{e}")
-            self._show_error_dialog("自动化", f"应用到运行时失败：\n{e}")
+            self._show_error_dialog("自动化", f"应用到运行时发生异常：\n{e}")
 
+    # =========================================================
+    # Workflows List
+    # =========================================================
 
-        except Exception as e:
-            self._set_status_error(f"应用到运行时失败：{e}")
-            self._show_error_dialog("自动化", f"应用到运行时失败：\n{e}")
+    def _reload_workflows(self) -> None:
+        self.workflow_list.clear()
 
-    def _on_config_changed(self, index: int) -> None:
-        if index < 0:
-            return
+        for workflow in self.controller.workflows:
+            self.workflow_list.addItem(
+                QListWidgetItem(self.controller.workflow_display_text(workflow))
+            )
 
-        try:
-            name = self.config_combo.currentText().strip()
-            if not name:
-                return
+        if self.controller.workflows:
+            if self._current_workflow_index < 0:
+                self._current_workflow_index = 0
 
-            self.controller.set_current_config_name(name)
-            self.controller.load_current()
-
+            self._current_workflow_index = min(
+                self._current_workflow_index,
+                len(self.controller.workflows) - 1,
+            )
+            self.workflow_list.setCurrentRow(self._current_workflow_index)
+        else:
             self._current_workflow_index = -1
             self._current_trigger_index = -1
             self._current_action_index = -1
-            self._reload_workflows()
-            self._reload_global_state()
+
+            self.trigger_list.clear()
+            self.action_list.clear()
+            self.rules_editor.set_workflow(None)
+            self.property_editor.set_target(None, None)
+
+        self._update_config_info()
+        self._update_action_test_buttons()
+
+    def _on_workflow_selection_changed(self, row: int) -> None:
+        if row < 0 or row >= len(self.controller.workflows):
+            return
+
+        self._current_workflow_index = row
+        self._current_trigger_index = -1
+        self._current_action_index = -1
+        self._reload_middle()
+
+    def _reload_middle(self) -> None:
+        self.trigger_list.clear()
+        self.action_list.clear()
+
+        workflow = self._get_current_workflow()
+        if workflow is None:
+            self.rules_editor.set_workflow(None)
+            self.property_editor.set_target(None, None)
             self._update_config_info()
+            self._update_action_test_buttons()
+            return
 
-            self._set_status_saved(
-                f"当前正在编辑配置：{name}。"
-                + (" 已切换文件，若要影响当前会话，请点击“应用到运行时”。" if self.controller.has_live_runtime() else " 仅文件编辑模式。")
+        # 增加强力容错：防止外部 JSON 文件里的字段被错误写成了 null
+        triggers = getattr(workflow, "Triggers", []) or []
+        for trigger in triggers:
+            self.trigger_list.addItem(
+                QListWidgetItem(self.controller.trigger_display_text(trigger))
             )
-        except Exception as e:
-            self._set_status_error(f"切换配置文件失败：{e}")
-            self._show_error_dialog("自动化", f"切换配置文件失败：\n{e}")
 
-    # =========================================================
-    # Workflow
-    # =========================================================
+        action_set = getattr(workflow, "ActionSet", None)
+        actions = getattr(action_set, "Actions", []) if action_set else []
+        for action in (actions or []):
+            self.action_list.addItem(
+                QListWidgetItem(self.controller.action_display_text(action))
+            )
+
+        self.rules_editor.set_workflow(workflow)
+
+        if self._current_trigger_index >= 0:
+            self.property_editor.set_target("trigger", self._get_current_trigger())
+        elif self._current_action_index >= 0:
+            self.property_editor.set_target("action", self._get_current_action())
+        else:
+            self.property_editor.set_target("workflow", workflow)
+
+        self._update_config_info()
+        self._update_action_test_buttons()
 
     def _on_new_workflow(self) -> None:
-        try:
-            self.controller.create_workflow()
-            self._current_workflow_index = len(self.controller.workflows) - 1
-            self._current_trigger_index = -1
-            self._current_action_index = -1
-            self._reload_workflows()
-            self.rules_editor.clear_selection_focus()
-            self._set_status_saved("已新建工作流，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"新建工作流失败：{e}")
-            self._show_error_dialog("自动化", f"新建工作流失败：\n{e}")
+        self.controller.add_workflow()
+        self._current_workflow_index = len(self.controller.workflows) - 1
+        self._reload_workflows()
+        self._set_status_saved("已添加新工作流。")
 
     def _on_delete_workflow(self) -> None:
-        try:
-            if self._current_workflow_index < 0:
-                return
-            self.controller.delete_workflow(self._current_workflow_index)
-            self._current_trigger_index = -1
-            self._current_action_index = -1
-            self._current_workflow_index = min(self._current_workflow_index, len(self.controller.workflows) - 1)
-            self._reload_workflows()
-            self.rules_editor.clear_selection_focus()
-            self._set_status_saved("已删除工作流，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"删除工作流失败：{e}")
-            self._show_error_dialog("自动化", f"删除工作流失败：\n{e}")
+        if self._current_workflow_index < 0:
+            return
+
+        if not self._ask_confirm("删除工作流", "确定要删除当前选中的工作流吗？"):
+            return
+
+        self.controller.delete_workflow(self._current_workflow_index)
+        self._reload_workflows()
+        self._set_status_saved("已删除工作流。")
 
     def _on_workflow_up(self) -> None:
-        try:
-            self._current_workflow_index = self.controller.move_workflow_up(self._current_workflow_index)
+        if self.controller.move_workflow_up(self._current_workflow_index):
+            self._current_workflow_index -= 1
             self._reload_workflows()
-            self.rules_editor.clear_selection_focus()
-            self._set_status_saved("已调整工作流顺序，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"上移工作流失败：{e}")
-            self._show_error_dialog("自动化", f"上移工作流失败：\n{e}")
+            self._set_status_saved()
 
     def _on_workflow_down(self) -> None:
-        try:
-            self._current_workflow_index = self.controller.move_workflow_down(self._current_workflow_index)
+        if self.controller.move_workflow_down(self._current_workflow_index):
+            self._current_workflow_index += 1
             self._reload_workflows()
-            self.rules_editor.clear_selection_focus()
-            self._set_status_saved("已调整工作流顺序，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"下移工作流失败：{e}")
-            self._show_error_dialog("自动化", f"下移工作流失败：\n{e}")
+            self._set_status_saved()
 
     # =========================================================
-    # Trigger
+    # Triggers List
     # =========================================================
+
+    def _on_trigger_selection_changed(self, row: int) -> None:
+        if row < 0:
+            return
+        self._current_trigger_index = row
+
+        self.action_list.blockSignals(True)
+        self.action_list.clearSelection()
+        self._current_action_index = -1
+        self.action_list.blockSignals(False)
+
+        self.rules_editor.clear_selection()
+        self.property_editor.set_target("trigger", self._get_current_trigger())
 
     def _on_add_trigger(self) -> None:
         try:
@@ -1590,61 +1321,28 @@ class AutomationSettingsPage(QWidget):
             if workflow is None:
                 return
 
-            trigger_id = self._pick_trigger_id()
-            if not trigger_id:
-                return
+            # 强力自我修复：如果底层因为坏 JSON 变成了 None，强行重置为正确列表
+            if getattr(workflow, "Triggers", None) is None:
+                workflow.Triggers = []
 
-            self.controller.add_trigger(workflow, trigger_id)
-            self._reload_middle()
-            self._set_status_saved("已添加触发器，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"添加触发器失败：{e}")
-            self._show_error_dialog("自动化", f"添加触发器失败：\n{e}")
+            dlg = GroupedPickerDialog(
+                "选择触发器",
+                self.controller.available_trigger_groups(),
+                TRIGGER_DESCRIPTIONS,
+                self._dialog_host(),
+            )
 
-    def _on_delete_trigger(self) -> None:
-        try:
-            workflow = self._get_current_workflow()
-            if workflow is None:
-                return
-            self.controller.delete_trigger(workflow, self._current_trigger_index)
-            self._current_trigger_index = -1
-            self._reload_middle()
-            self._set_status_saved("已删除触发器，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"删除触发器失败：{e}")
-            self._show_error_dialog("自动化", f"删除触发器失败：\n{e}")
-
-    def _on_trigger_up(self) -> None:
-        try:
-            workflow = self._get_current_workflow()
-            if workflow is None:
-                return
-            self._current_trigger_index = self.controller.move_trigger_up(workflow, self._current_trigger_index)
-            self._reload_middle()
-            if self._current_trigger_index >= 0:
+            if self._exec_dialog(dlg) == QDialog.Accepted and dlg.selected_id:
+                self.controller.add_trigger(workflow, dlg.selected_id)
+                self._current_trigger_index = len(workflow.Triggers) - 1
+                self._reload_middle()
                 self.trigger_list.setCurrentRow(self._current_trigger_index)
-            self._set_status_saved("已调整触发器顺序，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"上移触发器失败：{e}")
-            self._show_error_dialog("自动化", f"上移触发器失败：\n{e}")
+                self._set_status_saved("已添加触发器。")
 
-    def _on_trigger_down(self) -> None:
-        try:
-            workflow = self._get_current_workflow()
-            if workflow is None:
-                return
-            self._current_trigger_index = self.controller.move_trigger_down(workflow, self._current_trigger_index)
-            self._reload_middle()
-            if self._current_trigger_index >= 0:
-                self.trigger_list.setCurrentRow(self._current_trigger_index)
-            self._set_status_saved("已调整触发器顺序，并保存到文件。")
         except Exception as e:
-            self._set_status_error(f"下移触发器失败：{e}")
-            self._show_error_dialog("自动化", f"下移触发器失败：\n{e}")
-
-    # =========================================================
-    # Action
-    # =========================================================
+            import traceback
+            traceback.print_exc()
+            self._show_error_dialog("添加失败", f"添加触发器异常，已记录到后台：\n{e}")
 
     def _on_add_action(self) -> None:
         try:
@@ -1652,57 +1350,127 @@ class AutomationSettingsPage(QWidget):
             if workflow is None:
                 return
 
-            action_id = self._pick_action_id()
-            if not action_id:
-                return
+            # 强力自我修复：如果底层 ActionSet 坏了，强行重建
+            if getattr(workflow, "ActionSet", None) is None:
+                from automation.models import ActionSet
+                import uuid
+                workflow.ActionSet = ActionSet(Guid=str(uuid.uuid4()), Name="新工作流")
 
-            self.controller.add_action(workflow, action_id)
-            self._reload_middle()
-            self._set_status_saved("已添加动作，并保存到文件。")
+            if getattr(workflow.ActionSet, "Actions", None) is None:
+                workflow.ActionSet.Actions = []
+
+            dlg = GroupedPickerDialog(
+                "选择动作",
+                self.controller.available_action_groups(),
+                ACTION_DESCRIPTIONS,
+                self._dialog_host(),
+            )
+
+            if self._exec_dialog(dlg) == QDialog.Accepted and dlg.selected_id:
+                self.controller.add_action(workflow, dlg.selected_id)
+                self._current_action_index = len(workflow.ActionSet.Actions) - 1
+                self._reload_middle()
+                self.action_list.setCurrentRow(self._current_action_index)
+                self._set_status_saved("已添加动作。")
+
         except Exception as e:
-            self._set_status_error(f"添加动作失败：{e}")
-            self._show_error_dialog("自动化", f"添加动作失败：\n{e}")
+            import traceback
+            traceback.print_exc()
+            self._show_error_dialog("添加失败", f"添加动作异常，已记录到后台：\n{e}")
+
+    def _on_delete_trigger(self) -> None:
+        workflow = self._get_current_workflow()
+        if workflow is None or self._current_trigger_index < 0:
+            return
+
+        if not self._ask_confirm("删除触发器", "确定要删除当前选中的触发器吗？"):
+            return
+
+        self.controller.delete_trigger(workflow, self._current_trigger_index)
+        self._current_trigger_index = -1
+        self._reload_middle()
+        self._set_status_saved("已删除触发器。")
+
+    def _on_trigger_up(self) -> None:
+        workflow = self._get_current_workflow()
+        if workflow and self.controller.move_trigger_up(workflow, self._current_trigger_index):
+            self._current_trigger_index -= 1
+            self._reload_middle()
+            self.trigger_list.setCurrentRow(self._current_trigger_index)
+            self._set_status_saved()
+
+    def _on_trigger_down(self) -> None:
+        workflow = self._get_current_workflow()
+        if workflow and self.controller.move_trigger_down(workflow, self._current_trigger_index):
+            self._current_trigger_index += 1
+            self._reload_middle()
+            self.trigger_list.setCurrentRow(self._current_trigger_index)
+            self._set_status_saved()
+
+    # =========================================================
+    # Actions List
+    # =========================================================
+
+    def _on_action_selection_changed(self, row: int) -> None:
+        if row < 0:
+            return
+        self._current_action_index = row
+
+        self.trigger_list.blockSignals(True)
+        self.trigger_list.clearSelection()
+        self._current_trigger_index = -1
+        self.trigger_list.blockSignals(False)
+
+        self.rules_editor.clear_selection()
+        self.property_editor.set_target("action", self._get_current_action())
+
+    def _on_add_action(self) -> None:
+        workflow = self._get_current_workflow()
+        if workflow is None:
+            return
+
+        dlg = GroupedPickerDialog(
+            "选择动作",
+            self.controller.available_action_groups(),  # 这里加上了 _groups
+            ACTION_DESCRIPTIONS,
+            self._dialog_host(),
+        )
+
+        if self._exec_dialog(dlg) == QDialog.Accepted and dlg.selected_id:
+            self.controller.add_action(workflow, dlg.selected_id)
+            self._current_action_index = len(workflow.ActionSet.Actions) - 1
+            self._reload_middle()
+            self.action_list.setCurrentRow(self._current_action_index)
+            self._set_status_saved("已添加动作。")
 
     def _on_delete_action(self) -> None:
-        try:
-            workflow = self._get_current_workflow()
-            if workflow is None:
-                return
-            self.controller.delete_action(workflow, self._current_action_index)
-            self._current_action_index = -1
-            self._reload_middle()
-            self._set_status_saved("已删除动作，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"删除动作失败：{e}")
-            self._show_error_dialog("自动化", f"删除动作失败：\n{e}")
+        workflow = self._get_current_workflow()
+        if workflow is None or self._current_action_index < 0:
+            return
+
+        if not self._ask_confirm("删除动作", "确定要删除当前选中的动作吗？"):
+            return
+
+        self.controller.delete_action(workflow, self._current_action_index)
+        self._current_action_index = -1
+        self._reload_middle()
+        self._set_status_saved("已删除动作。")
 
     def _on_action_up(self) -> None:
-        try:
-            workflow = self._get_current_workflow()
-            if workflow is None:
-                return
-            self._current_action_index = self.controller.move_action_up(workflow, self._current_action_index)
+        workflow = self._get_current_workflow()
+        if workflow and self.controller.move_action_up(workflow, self._current_action_index):
+            self._current_action_index -= 1
             self._reload_middle()
-            if self._current_action_index >= 0:
-                self.action_list.setCurrentRow(self._current_action_index)
-            self._set_status_saved("已调整动作顺序，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"上移动作失败：{e}")
-            self._show_error_dialog("自动化", f"上移动作失败：\n{e}")
+            self.action_list.setCurrentRow(self._current_action_index)
+            self._set_status_saved()
 
     def _on_action_down(self) -> None:
-        try:
-            workflow = self._get_current_workflow()
-            if workflow is None:
-                return
-            self._current_action_index = self.controller.move_action_down(workflow, self._current_action_index)
+        workflow = self._get_current_workflow()
+        if workflow and self.controller.move_action_down(workflow, self._current_action_index):
+            self._current_action_index += 1
             self._reload_middle()
-            if self._current_action_index >= 0:
-                self.action_list.setCurrentRow(self._current_action_index)
-            self._set_status_saved("已调整动作顺序，并保存到文件。")
-        except Exception as e:
-            self._set_status_error(f"下移动作失败：{e}")
-            self._show_error_dialog("自动化", f"下移动作失败：\n{e}")
+            self.action_list.setCurrentRow(self._current_action_index)
+            self._set_status_saved()
 
     def _on_test_invoke_actions(self) -> None:
         try:
@@ -1739,7 +1507,6 @@ class AutomationSettingsPage(QWidget):
             ):
                 return
 
-            # 保存编辑态，确保外部文件和内存一致；测试实际使用的是当前编辑态对象的副本
             self.controller.save_current()
             self.controller.test_invoke_workflow(workflow)
 
@@ -1809,77 +1576,44 @@ class AutomationSettingsPage(QWidget):
             self._set_status_error(f"测试恢复失败：{e}")
             self._show_error_dialog("自动化", f"测试恢复失败：\n{e}")
 
-
-        # =========================================================
-    # Selection
     # =========================================================
-
-    def _on_workflow_selected(self, row: int) -> None:
-        self._current_workflow_index = row
-        self._current_trigger_index = -1
-        self._current_action_index = -1
-        self._reload_middle()
-        self.rules_editor.clear_selection_focus()
-
-        workflow = self._get_current_workflow()
-        if workflow is not None:
-            self.property_editor.set_target("workflow", workflow)
-
-    def _on_trigger_selected(self, row: int) -> None:
-        self._current_trigger_index = row
-        if row >= 0:
-            self.action_list.blockSignals(True)
-            self.action_list.clearSelection()
-            self.action_list.setCurrentRow(-1)
-            self.action_list.blockSignals(False)
-            self._current_action_index = -1
-            self.rules_editor.clear_selection_focus()
-
-        trigger = self._get_current_trigger()
-        if trigger is not None:
-            self.property_editor.set_target("trigger", trigger)
-        elif self._get_current_workflow() is not None:
-            self.property_editor.set_target("workflow", self._get_current_workflow())
-
-    def _on_action_selected(self, row: int) -> None:
-        self._current_action_index = row
-        if row >= 0:
-            self.trigger_list.blockSignals(True)
-            self.trigger_list.clearSelection()
-            self.trigger_list.setCurrentRow(-1)
-            self.trigger_list.blockSignals(False)
-            self._current_trigger_index = -1
-            self.rules_editor.clear_selection_focus()
-
-        action = self._get_current_action()
-        if action is not None:
-            self.property_editor.set_target("action", action)
-        elif self._get_current_workflow() is not None:
-            self.property_editor.set_target("workflow", self._get_current_workflow())
-
-    def _on_ruleset_target_changed(self, kind: str, target: object) -> None:
-        self._clear_trigger_action_selection()
-        if target is not None:
-            self.property_editor.set_target(kind, target)
-
-    # =========================================================
-    # Property changed
+    # Property / Ruleset changes
     # =========================================================
 
     def _on_property_changed(self) -> None:
-        try:
-            self.controller.save_current()
-            self._refresh_summary_texts_only()
-            self._set_status_saved()
-        except Exception as e:
-            self._set_status_error(f"保存属性失败：{e}")
-            self._show_error_dialog("自动化", f"保存属性失败：\n{e}")
+        self._set_status_saved()
+        if self._current_workflow_index >= 0:
+            workflow = self.controller.workflows[self._current_workflow_index]
+            self.workflow_list.item(self._current_workflow_index).setText(
+                self.controller.workflow_display_text(workflow)
+            )
+
+        if self._current_trigger_index >= 0:
+            trigger = self._get_current_trigger()
+            if trigger:
+                self.trigger_list.item(self._current_trigger_index).setText(
+                    self.controller.trigger_display_text(trigger)
+                )
+
+        if self._current_action_index >= 0:
+            action = self._get_current_action()
+            if action:
+                self.action_list.item(self._current_action_index).setText(
+                    self.controller.action_display_text(action)
+                )
+
+    def _on_rule_selection_changed(self, kind: str, target: Any) -> None:
+        self.trigger_list.blockSignals(True)
+        self.trigger_list.clearSelection()
+        self._current_trigger_index = -1
+        self.trigger_list.blockSignals(False)
+
+        self.action_list.blockSignals(True)
+        self.action_list.clearSelection()
+        self._current_action_index = -1
+        self.action_list.blockSignals(False)
+
+        self.property_editor.set_target(kind, target)
 
     def _on_ruleset_changed(self) -> None:
-        try:
-            self.controller.save_current()
-            self._refresh_summary_texts_only()
-            self._set_status_saved('已修改规则集结构，并保存到文件。若要影响当前会话，请点击“应用到运行时”。')
-        except Exception as e:
-            self._set_status_error(f"保存规则集失败：{e}")
-            self._show_error_dialog("自动化", f"保存规则集失败：\n{e}")
+        self._set_status_saved()

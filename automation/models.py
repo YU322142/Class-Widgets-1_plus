@@ -125,6 +125,7 @@ class CurrentSubjectRuleSettings:
 @dataclass
 class CurrentWeatherRuleSettings:
     WeatherId: int = 0
+    IsFuzzyMatch: bool = False
 
 
 @dataclass
