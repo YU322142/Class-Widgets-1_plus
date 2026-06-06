@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from re import match
+from re import fullmatch
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, model_validator
@@ -31,12 +31,13 @@ class Subjects(BaseModel):
     name: str
     teacher: Optional[str] = None
     room: Optional[str] = None
+    location: Optional[str] = None
     simplified_name: Optional[str] = None
 
 
 def validate_cses_time(time: str) -> str:
     regex = r"([01]\d|2[0-3]):([0-5]\d):([0-5]\d)"
-    if match(regex, time):
+    if fullmatch(regex, time):
         return time
     raise ValueError({"need": repr(regex), "got": time})
 
@@ -49,8 +50,8 @@ class CsesClass(BaseModel):
 
 class CsesSchedule(BaseModel):
     name: str
-    enable_day: Literal[1, 2, 3, 4, 5, 6, 7]
-    weeks: Literal["all", "odd", "even"]
+    enable_day: Union[Literal[1, 2, 3, 4, 5, 6, 7], List[int], str]
+    weeks: Optional[Literal["all", "odd", "even"]] = None
     classes: List[CsesClass]
 
     @model_validator(mode="after")
@@ -78,9 +79,20 @@ class CsesSchedule(BaseModel):
 
 
 class Cses(BaseModel):
-    version: Literal[1]
+    version: Literal[1, 2]
+    configuration: Optional[Dict[str, Any]] = None
     subjects: List[Subjects]
     schedules: List[CsesSchedule]
+
+    @model_validator(mode="after")
+    def validate_version_shape(self) -> Self:
+        if self.version == 1:
+            for schedule in self.schedules:
+                if schedule.weeks is None:
+                    raise ValueError({"forget": {"schedule weeks": schedule.name}})
+        if self.version == 2 and self.configuration is None:
+            raise ValueError({"forget": "configuration"})
+        return self
 
     @model_validator(mode="after")
     def validate_schedule_name(self) -> Self:
@@ -96,9 +108,20 @@ class Cses(BaseModel):
     def validate_schedule_weeks_enable_day(self) -> Self:
         count_map: Dict[Tuple[str, int], List[str]] = {}
         for schedule in self.schedules:
-            current_id = (schedule.weeks, schedule.enable_day)
-            current_status = count_map.get(current_id, [])
-            count_map[current_id] = [*current_status, schedule.name]
+            if self.version != 1:
+                continue
+            if isinstance(schedule.enable_day, int):
+                enable_days = [schedule.enable_day]
+            elif isinstance(schedule.enable_day, list):
+                enable_days = schedule.enable_day
+            elif str(schedule.enable_day).isdigit():
+                enable_days = [int(schedule.enable_day)]
+            else:
+                continue
+            for enable_day in enable_days:
+                current_id = (schedule.weeks or "all", enable_day)
+                current_status = count_map.get(current_id, [])
+                count_map[current_id] = [*current_status, schedule.name]
         conflict_map = {id: names for id, names in count_map.items() if len(names) > 1}
         if len(conflict_map) != 0:
             raise ValueError({"conflict": {"weeks & enable_day": conflict_map}})

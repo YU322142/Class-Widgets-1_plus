@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
+    CheckBox,
     ListWidget,
     PushButton,
     StrongBodyLabel,
@@ -48,6 +49,7 @@ RULE_GROUPS: dict[str, list[str]] = {
     ],
     "天气": [
         "classisland.weather.currentWeather",
+        "classisland.weather.tomorrowWeather",
         "classisland.weather.hasWeatherAlert",
         "classisland.weather.rainTime",
         "classisland.weather.sunRiseSet",
@@ -63,7 +65,8 @@ RULE_DESCRIPTIONS: dict[str, str] = {
     "classisland.lessons.nextSubject": "下节课科目匹配（CW 当前按科目显示名称比较）。",
     "classisland.lessons.previousSubject": "上节课科目匹配（CW 当前按科目显示名称比较）。",
     "classisland.lessons.timeState": "当前时间状态匹配。",
-    "classisland.weather.currentWeather": "当前天气类型匹配（当前实现按精确天气代码比较）。",
+    "classisland.weather.currentWeather": "当前天气类型匹配（按 ClassIsland 天气代码比较，支持模糊匹配）。",
+    "classisland.weather.tomorrowWeather": "明天天气类型匹配（同时比较白天和夜间天气，支持模糊匹配）。",
     "classisland.weather.hasWeatherAlert": "天气预警文本匹配。",
     "classisland.weather.rainTime": "距离下雨开始/结束的时间范围判断。",
     "classisland.weather.sunRiseSet": "当前是否日出后 / 日落后。",
@@ -81,6 +84,7 @@ RULE_NAME_FALLBACKS: dict[str, str] = {
     "classisland.lessons.previousSubject": "上节课科目是",
     "classisland.lessons.timeState": "当前时间状态是",
     "classisland.weather.currentWeather": "当前天气是",
+    "classisland.weather.tomorrowWeather": "明天天气是",
     "classisland.weather.hasWeatherAlert": "存在天气预警",
     "classisland.weather.rainTime": "距离降雨开始/结束还剩",
     "classisland.weather.sunRiseSet": "是否日出/日落",
@@ -111,6 +115,10 @@ class RulesetEditor(QWidget):
         top_row.setSpacing(8)
         self.edit_ruleset_btn = PushButton("编辑全局规则集属性")
         top_row.addWidget(self.edit_ruleset_btn)
+
+        self.condition_enabled_box = CheckBox("启用条件/规则集")
+        self.condition_enabled_box.setToolTip("开启后，工作流触发时会先判断规则集；关闭时忽略规则集。")
+        top_row.addWidget(self.condition_enabled_box)
 
         self.live_status_label = StrongBodyLabel("")
         top_row.addWidget(self.live_status_label)
@@ -189,6 +197,7 @@ class RulesetEditor(QWidget):
         self.main_splitter.setStretchFactor(1, 1)
 
         self.edit_ruleset_btn.clicked.connect(self._on_edit_ruleset)
+        self.condition_enabled_box.stateChanged.connect(self._on_condition_enabled_changed)
 
         self.group_list.currentRowChanged.connect(self._on_group_selection_changed)
         # 增加这一行，确保鼠标重复点击同一行也能切过去
@@ -244,6 +253,10 @@ class RulesetEditor(QWidget):
         self._current_rule_index = -1
         self.rule_list.blockSignals(False)
 
+    def refresh_workflow_state(self) -> None:
+        self._update_ui_state()
+        self._update_live_status()
+
     def _get_ruleset(self):
         if self._workflow:
             if self._workflow.Ruleset is None:
@@ -255,6 +268,7 @@ class RulesetEditor(QWidget):
     def _update_ui_state(self) -> None:
         has_wf = self._workflow is not None
         self.edit_ruleset_btn.setEnabled(has_wf)
+        self._sync_condition_enabled_box()
         self.add_group_btn.setEnabled(has_wf)
 
         has_group = has_wf and self._current_group_index >= 0
@@ -277,8 +291,23 @@ class RulesetEditor(QWidget):
             rules_cnt = sum(len(g.Rules) for g in rs.Groups)
             mode_str = "且 (AND)" if rs.Mode == RulesetLogicalMode.And else "或 (OR)"
             rev_str = " (结果反转)" if rs.IsReversed else ""
-            self.status_label.setText(f"当前工作流规则集：全局逻辑 {mode_str}{rev_str}")
+            condition_str = "已启用" if self._workflow.IsConditionEnabled else "未启用"
+            self.status_label.setText(f"当前工作流规则集：条件 {condition_str}，全局逻辑 {mode_str}{rev_str}")
             self.summary_label.setText(f"共包含 {groups_cnt} 个规则组，{rules_cnt} 条规则。")
+
+    def _sync_condition_enabled_box(self) -> None:
+        self.condition_enabled_box.blockSignals(True)
+        self.condition_enabled_box.setEnabled(self._workflow is not None)
+        self.condition_enabled_box.setChecked(bool(self._workflow and self._workflow.IsConditionEnabled))
+        self.condition_enabled_box.blockSignals(False)
+
+    def _on_condition_enabled_changed(self, _state: int) -> None:
+        if self._workflow is None:
+            return
+        self._workflow.IsConditionEnabled = bool(self.condition_enabled_box.isChecked())
+        self._update_ui_state()
+        self._update_live_status()
+        self.data_changed.emit()
 
     def _reload_groups(self) -> None:
         self.group_list.clear()

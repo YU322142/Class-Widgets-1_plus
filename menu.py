@@ -89,6 +89,7 @@ from qfluentwidgets import (
     TableWidget,
     Theme,
     TimeEdit,
+    TitleLabel,
     ToolButton,
     ToolTipFilter,
     ToolTipPosition,
@@ -3155,6 +3156,98 @@ class SettingsMenu(FluentWindow):
         self.table.setItemWidget(it, item_widget)
         return item_widget
 
+    def _setup_schedule_management_layout(self) -> None:
+        title = self.cfInterface.findChild(TitleLabel, 'TitleLabel')
+        if title:
+            title.setText(self.tr('课表管理'))
+
+        self.config_url.setPlaceholderText(
+            self.tr('例如：default:senior-1，或 https://example.com/schedule.json')
+        )
+        self.config_url.setToolTip(
+            self.tr('同步来源：支持“数据库简称:课表ID”或完整 URL。下载会新建课表，更新/上传作用于当前课表。')
+        )
+        self.config_download.setText(self.tr('下载为新课表'))
+        self.config_download.setToolTip(self.tr('从同步来源下载课表，并保存成一个新的本地课表。'))
+        self.update_now.setText(self.tr('更新当前'))
+        self.update_now.setToolTip(self.tr('使用当前课表保存的同步地址刷新当前课表。'))
+        self.config_upload.setText(self.tr('上传当前'))
+        self.config_upload.setToolTip(self.tr('把当前课表上传到同步来源。'))
+        self.config_new.setText(self.tr('新建课表'))
+        self.config_new.setToolTip(self.tr('创建一个新的本地课表。'))
+        self.import_from_file.setText(self.tr('导入 JSON'))
+        self.import_from_file.setToolTip(self.tr('导入 Class Widgets JSON 课表。'))
+        self.import_cses_from_file.setToolTip(self.tr('导入 CSES v1/v2 YAML 课表。'))
+        self.export_current_json.setToolTip(self.tr('把当前选中的课表导出为 Class Widgets JSON。'))
+        self.export_current_cses.setToolTip(self.tr('把当前选中的课表导出为 CSES YAML。'))
+        self.delete_current_schedule.setToolTip(self.tr('删除当前选中的本地课表文件。'))
+        self.db_edit.setText(self.tr('管理来源'))
+        self.db_edit.setToolTip(self.tr('编辑可缩写使用的课表数据库来源。'))
+
+        container = self.cfInterface.findChild(QWidget, 'scrollAreaWidgetContents')
+        main_layout = container.layout() if container else None
+        sync_layout = self.cfInterface.findChild(QHBoxLayout, 'horizontalLayout')
+        if main_layout is None or sync_layout is None:
+            return
+
+        def layout_index(layout, target_layout) -> int:
+            for index in range(layout.count()):
+                item = layout.itemAt(index)
+                if item and item.layout() is target_layout:
+                    return index
+            return 0
+
+        sync_index = layout_index(main_layout, sync_layout)
+
+        sync_title = StrongBodyLabel(self.tr('同步来源'))
+        sync_hint = CaptionLabel(
+            self.tr(
+                '这里用于从课表数据库或网络地址同步课表。可填“数据库简称:课表ID”，'
+                '也可填完整 URL；留空时只管理本地课表文件。'
+            )
+        )
+        sync_hint.setWordWrap(True)
+        main_layout.insertWidget(sync_index, sync_title)
+        main_layout.insertWidget(sync_index + 1, sync_hint)
+
+        file_action_widgets = [
+            self.config_new,
+            self.import_from_file,
+            self.import_cses_from_file,
+            self.export_current_json,
+            self.export_current_cses,
+            self.delete_current_schedule,
+        ]
+        for widget in file_action_widgets:
+            sync_layout.removeWidget(widget)
+
+        file_title = StrongBodyLabel(self.tr('课表文件'))
+        file_hint = CaptionLabel(
+            self.tr('选择下方列表中的课表即可切换当前课表；文件操作只作用于当前选中的课表。')
+        )
+        file_hint.setWordWrap(True)
+
+        file_actions_layout = QHBoxLayout()
+        file_actions_layout.setSpacing(8)
+        for widget in file_action_widgets:
+            widget.setMinimumWidth(88)
+            file_actions_layout.addWidget(widget)
+        file_actions_layout.addStretch(1)
+
+        sync_row_index = layout_index(main_layout, sync_layout)
+        main_layout.insertWidget(sync_row_index + 1, file_title)
+        main_layout.insertWidget(sync_row_index + 2, file_hint)
+        main_layout.insertLayout(sync_row_index + 3, file_actions_layout)
+
+        table = self.cfInterface.findChild(ListWidget, 'config_table')
+        table_index = main_layout.indexOf(table)
+        if table_index >= 0:
+            list_title = StrongBodyLabel(self.tr('本地课表'))
+            list_hint = CaptionLabel(self.tr('当前使用的课表会在列表中被选中。'))
+            list_hint.setWordWrap(True)
+            main_layout.insertWidget(table_index, list_title)
+            main_layout.insertWidget(table_index + 1, list_hint)
+
     def setup_configs_interface(self):  # 配置界面
         self.config_url = self.cfInterface.findChild(LineEdit, 'config_url')
 
@@ -3173,8 +3266,22 @@ class SettingsMenu(FluentWindow):
         self.import_from_file = self.cfInterface.findChild(PushButton, 'config_import')
         self.import_from_file.clicked.connect(self.cf_import_schedule)  # 从文件导入
 
+        self.import_cses_from_file = PushButton(self.tr('导入 CSES'))
+        self.import_cses_from_file.clicked.connect(self.cf_import_schedule_cses_file)
+
+        self.export_current_json = PushButton(self.tr('导出当前'))
+        self.export_current_json.clicked.connect(self.cf_export_current_schedule)
+
+        self.export_current_cses = PushButton(self.tr('导出 CSES'))
+        self.export_current_cses.clicked.connect(self.cf_export_current_schedule_cses)
+
+        self.delete_current_schedule = PushButton(self.tr('删除选中'))
+        self.delete_current_schedule.clicked.connect(self.cf_delete_current_schedule)
+
         self.db_edit = self.cfInterface.findChild(PushButton, 'config_db_edit')
         self.db_edit.clicked.connect(self.cf_open_db_edit)
+
+        self._setup_schedule_management_layout()
 
         # 用自定义的 UniformListWidget 替换原 table
         old = self.cfInterface.findChild(ListWidget, 'config_table')
@@ -4950,10 +5057,10 @@ class SettingsMenu(FluentWindow):
         return None
 
     def cf_import_schedule_cses(self, file_path: str):  # 导入课程表（CSES）
-        # TODO: 切换到 pathlib.Path
         if file_path:
-            file_name = file_path.split("/")[-1]
-            save_path = SCHEDULE_DIR / file_name.replace('.yaml', '.json')
+            source_path = Path(file_path)
+            file_name = source_path.name
+            save_path = SCHEDULE_DIR / source_path.with_suffix('.json').name
 
             if save_path.exists():
                 overwrite = MessageBox(
@@ -4965,10 +5072,16 @@ class SettingsMenu(FluentWindow):
                 if not overwrite.exec():
                     return
 
-            importer = CSES_Converter(file_path)
-            importer.load_parser()
-            cw_data = importer.convert_to_cw()
-            if not cw_data:
+            try:
+                importer = CSES_Converter(file_path)
+                parser = importer.load_parser()
+                if isinstance(parser, str):
+                    raise ValueError(parser)
+                cw_data = importer.convert_to_cw()
+                if not cw_data:
+                    raise ValueError("CSES conversion returned empty data")
+            except Exception as e:
+                logger.error(f'CSES 课程表转换失败：{e}')
                 self.show_tip_flyout(
                     self.tr('转换失败！'),
                     self.tr(
@@ -4980,6 +5093,7 @@ class SettingsMenu(FluentWindow):
                     InfoBarIcon.ERROR,
                     FlyoutAnimationType.PULL_UP,
                 )
+                return
             try:
                 with open(save_path, 'w', encoding='utf-8') as f:
                     json.dump(cw_data, f, ensure_ascii=False, indent=4)
@@ -5032,6 +5146,133 @@ class SettingsMenu(FluentWindow):
                     FlyoutAnimationType.PULL_UP,
                 )
 
+    def _current_schedule_file_name(self) -> Optional[str]:
+        config_list = list_.get_schedule_config()
+        if not config_list:
+            return None
+
+        if hasattr(self, 'table'):
+            row = self.table.currentRow()
+            if 0 <= row < len(config_list):
+                return config_list[row]
+
+        current_name = config_center.read_conf('General', 'schedule')
+        if current_name in config_list:
+            return current_name
+        return config_list[0]
+
+    def _refresh_schedule_after_file_change(self) -> None:
+        global loaded_data
+        config_center.schedule_name = config_center.read_conf('General', 'schedule')
+        schedule_center.update_schedule()
+        loaded_data = schedule_center.schedule_data
+        self.te_load_item()
+        self.te_upload_list()
+        self.te_update_parts_name()
+        se_load_item()
+        self.se_upload_list()
+        self.sp_fill_grid_row()
+
+    def cf_export_current_schedule(self) -> None:
+        file_name = self._current_schedule_file_name()
+        if not file_name:
+            self.show_tip_flyout(
+                self.tr('导出失败！'),
+                self.tr('当前没有可导出的课程表。'),
+                self.cfInterface,
+                InfoBarIcon.ERROR,
+                FlyoutAnimationType.PULL_UP,
+            )
+            return
+        self.cf_export_schedule(file_name)
+
+    def cf_export_current_schedule_cses(self) -> None:
+        file_name = self._current_schedule_file_name()
+        if not file_name:
+            self.show_tip_flyout(
+                self.tr('导出失败！'),
+                self.tr('当前没有可导出的课程表。'),
+                self.cfInterface,
+                InfoBarIcon.ERROR,
+                FlyoutAnimationType.PULL_UP,
+            )
+            return
+        self.cf_export_schedule_cses(file_name)
+
+    def cf_delete_current_schedule(self) -> None:
+        config_list = list_.get_schedule_config()
+        file_name = self._current_schedule_file_name()
+        if not file_name:
+            self.show_tip_flyout(
+                self.tr('删除失败！'),
+                self.tr('当前没有可删除的课程表。'),
+                self.cfInterface,
+                InfoBarIcon.ERROR,
+                FlyoutAnimationType.PULL_UP,
+            )
+            return
+
+        if len(config_list) <= 1:
+            self.show_tip_flyout(
+                self.tr('无法删除'),
+                self.tr('至少需要保留一个课表。'),
+                self.cfInterface,
+                InfoBarIcon.WARNING,
+                FlyoutAnimationType.PULL_UP,
+            )
+            return
+
+        confirm = MessageBox(
+            self.tr('删除课表'),
+            self.tr('确定要删除课表“{file_name}”吗？此操作不可撤销。').format(
+                file_name=file_name
+            ),
+            self,
+        )
+        confirm.yesButton.setText(self.tr('删除'))
+        if not confirm.exec():
+            return
+
+        try:
+            schedule_dir = SCHEDULE_DIR.resolve()
+            delete_path = (SCHEDULE_DIR / file_name).resolve()
+            if delete_path.parent != schedule_dir or delete_path.suffix.lower() != '.json':
+                raise ValueError(f"invalid schedule file path: {delete_path}")
+            delete_path.unlink()
+
+            if config_center.read_conf('General', 'schedule') == file_name:
+                next_name = next(name for name in config_list if name != file_name)
+                config_center.write_conf('General', 'schedule', next_name)
+                self._refresh_schedule_after_file_change()
+
+            self.cf_reload_table()
+            self.show_tip_flyout(
+                self.tr('删除成功'),
+                self.tr('已删除课表“{file_name}”。').format(file_name=file_name),
+                self.cfInterface,
+                InfoBarIcon.SUCCESS,
+                FlyoutAnimationType.PULL_UP,
+            )
+        except Exception as e:
+            logger.error(f'删除课表 {file_name} 时发生错误：{e}')
+            self.show_tip_flyout(
+                self.tr('删除失败！'),
+                f"{e}",
+                self.cfInterface,
+                InfoBarIcon.ERROR,
+                FlyoutAnimationType.PULL_UP,
+            )
+
+    def cf_import_schedule_cses_file(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr("选择 CSES 课程表"),
+            "",
+            self.tr("CSES 通用课程表交换文件 (*.yaml *.yml)"),
+        )
+        if file_path:
+            self.cf_import_schedule_cses(file_path)
+
     def cf_import_schedule(self):  # 导入课程表
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -5042,7 +5283,7 @@ class SettingsMenu(FluentWindow):
             ),
         )
         if file_path:
-            if file_path.endswith(('.yaml', '.yaml')):
+            if Path(file_path).suffix.lower() in {'.yaml', '.yml'}:
                 self.cf_import_schedule_cses(file_path)
                 return
             file_name = file_path.split("/")[-1]

@@ -23,7 +23,6 @@ from qfluentwidgets import (
     EditableComboBox,
     LineEdit,
     PushButton,
-    SpinBox,
     StrongBodyLabel,
     qconfig,
     isDarkTheme,
@@ -229,14 +228,6 @@ class AutomationPropertyEditor(QWidget):
             "IsRevertEnabled",
             hint="启用后，当规则集不再满足或触发恢复时，支持恢复的动作会自动回退。",
         )
-        self._add_checkbox(
-            section.form,
-            "启用条件",
-            workflow,
-            "IsConditionEnabled",
-            hint="启用后，只有规则集满足时工作流才会执行；不启用时将忽略规则集。",
-        )
-
     # =========================================================
     # Trigger
     # =========================================================
@@ -747,11 +738,16 @@ class AutomationPropertyEditor(QWidget):
             return
 
         if isinstance(settings, CurrentSubjectRuleSettings):
+            if not getattr(settings, "CwSubjectName", "") and getattr(settings, "SubjectId", ""):
+                subject_id = str(getattr(settings, "SubjectId", "") or "").strip()
+                if subject_id and subject_id != "00000000-0000-0000-0000-000000000000":
+                    settings.CwSubjectName = subject_id
+                    settings.SubjectId = "00000000-0000-0000-0000-000000000000"
             self._add_line_edit(
                 section.form,
                 "科目名称",
                 settings,
-                "SubjectId",
+                "CwSubjectName",
                 hint="输入要匹配的科目名称，例如填写“数学”。",
             )
             return
@@ -1183,7 +1179,7 @@ class AutomationPropertyEditor(QWidget):
         form.addRow(self._make_label(title), FieldWidget(combo, hint))
 
 
-class DoubleSpinBox(SpinBox):
+class DoubleSpinBox(QDoubleSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDecimals(1)

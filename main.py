@@ -4617,12 +4617,16 @@ class TipToastNotificationConsumer:
                 content=content,
                 duration=duration,
             )
-        finally:
-            try:
-                request.CompletedTokenSource.cancel()
-            except Exception:
-                pass
-            self.QueuedNotificationCount = max(0, self.QueuedNotificationCount - 1)
+            QTimer.singleShot(duration + 1300, lambda req=request: self._complete_request(req))
+        except Exception:
+            self._complete_request(request)
+
+    def _complete_request(self, request):
+        self.QueuedNotificationCount = max(0, self.QueuedNotificationCount - 1)
+        try:
+            request.CompletedTokenSource.cancel()
+        except Exception:
+            pass
 
 
 _automation_stopping_emitted = False

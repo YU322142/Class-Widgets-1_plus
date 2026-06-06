@@ -943,6 +943,7 @@ class AutomationSettingsPage(QWidget):
         self.workflow_down_btn.clicked.connect(self._on_workflow_down)
 
         self.workflow_list.currentRowChanged.connect(self._on_workflow_selection_changed)
+        self.workflow_list.itemClicked.connect(self._on_workflow_item_clicked)
 
         self.add_trigger_btn.clicked.connect(self._on_add_trigger)
         self.del_trigger_btn.clicked.connect(self._on_delete_trigger)
@@ -1231,6 +1232,9 @@ class AutomationSettingsPage(QWidget):
         self._current_action_index = -1
         self._reload_middle()
 
+    def _on_workflow_item_clicked(self, item: QListWidgetItem) -> None:
+        self._on_workflow_selection_changed(self.workflow_list.row(item))
+
     def _reload_middle(self) -> None:
         self.trigger_list.clear()
         self.action_list.clear()
@@ -1270,7 +1274,7 @@ class AutomationSettingsPage(QWidget):
         self._update_action_test_buttons()
 
     def _on_new_workflow(self) -> None:
-        self.controller.add_workflow()
+        self.controller.create_workflow()
         self._current_workflow_index = len(self.controller.workflows) - 1
         self._reload_workflows()
         self._set_status_saved("已添加新工作流。")
@@ -1287,14 +1291,16 @@ class AutomationSettingsPage(QWidget):
         self._set_status_saved("已删除工作流。")
 
     def _on_workflow_up(self) -> None:
-        if self.controller.move_workflow_up(self._current_workflow_index):
-            self._current_workflow_index -= 1
+        new_index = self.controller.move_workflow_up(self._current_workflow_index)
+        if new_index != self._current_workflow_index:
+            self._current_workflow_index = new_index
             self._reload_workflows()
             self._set_status_saved()
 
     def _on_workflow_down(self) -> None:
-        if self.controller.move_workflow_down(self._current_workflow_index):
-            self._current_workflow_index += 1
+        new_index = self.controller.move_workflow_down(self._current_workflow_index)
+        if new_index != self._current_workflow_index:
+            self._current_workflow_index = new_index
             self._reload_workflows()
             self._set_status_saved()
 
@@ -1393,16 +1399,24 @@ class AutomationSettingsPage(QWidget):
 
     def _on_trigger_up(self) -> None:
         workflow = self._get_current_workflow()
-        if workflow and self.controller.move_trigger_up(workflow, self._current_trigger_index):
-            self._current_trigger_index -= 1
+        if workflow:
+            new_index = self.controller.move_trigger_up(workflow, self._current_trigger_index)
+        else:
+            new_index = self._current_trigger_index
+        if new_index != self._current_trigger_index:
+            self._current_trigger_index = new_index
             self._reload_middle()
             self.trigger_list.setCurrentRow(self._current_trigger_index)
             self._set_status_saved()
 
     def _on_trigger_down(self) -> None:
         workflow = self._get_current_workflow()
-        if workflow and self.controller.move_trigger_down(workflow, self._current_trigger_index):
-            self._current_trigger_index += 1
+        if workflow:
+            new_index = self.controller.move_trigger_down(workflow, self._current_trigger_index)
+        else:
+            new_index = self._current_trigger_index
+        if new_index != self._current_trigger_index:
+            self._current_trigger_index = new_index
             self._reload_middle()
             self.trigger_list.setCurrentRow(self._current_trigger_index)
             self._set_status_saved()
@@ -1424,7 +1438,7 @@ class AutomationSettingsPage(QWidget):
         self.rules_editor.clear_selection()
         self.property_editor.set_target("action", self._get_current_action())
 
-    def _on_add_action(self) -> None:
+    def _on_add_action_legacy_duplicate(self) -> None:
         workflow = self._get_current_workflow()
         if workflow is None:
             return
@@ -1458,16 +1472,24 @@ class AutomationSettingsPage(QWidget):
 
     def _on_action_up(self) -> None:
         workflow = self._get_current_workflow()
-        if workflow and self.controller.move_action_up(workflow, self._current_action_index):
-            self._current_action_index -= 1
+        if workflow:
+            new_index = self.controller.move_action_up(workflow, self._current_action_index)
+        else:
+            new_index = self._current_action_index
+        if new_index != self._current_action_index:
+            self._current_action_index = new_index
             self._reload_middle()
             self.action_list.setCurrentRow(self._current_action_index)
             self._set_status_saved()
 
     def _on_action_down(self) -> None:
         workflow = self._get_current_workflow()
-        if workflow and self.controller.move_action_down(workflow, self._current_action_index):
-            self._current_action_index += 1
+        if workflow:
+            new_index = self.controller.move_action_down(workflow, self._current_action_index)
+        else:
+            new_index = self._current_action_index
+        if new_index != self._current_action_index:
+            self._current_action_index = new_index
             self._reload_middle()
             self.action_list.setCurrentRow(self._current_action_index)
             self._set_status_saved()
@@ -1587,6 +1609,7 @@ class AutomationSettingsPage(QWidget):
             self.workflow_list.item(self._current_workflow_index).setText(
                 self.controller.workflow_display_text(workflow)
             )
+            self.rules_editor.refresh_workflow_state()
 
         if self._current_trigger_index >= 0:
             trigger = self._get_current_trigger()
@@ -1617,3 +1640,8 @@ class AutomationSettingsPage(QWidget):
 
     def _on_ruleset_changed(self) -> None:
         self._set_status_saved()
+        if self._current_workflow_index >= 0:
+            workflow = self.controller.workflows[self._current_workflow_index]
+            self.workflow_list.item(self._current_workflow_index).setText(
+                self.controller.workflow_display_text(workflow)
+            )

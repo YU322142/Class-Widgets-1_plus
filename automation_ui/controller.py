@@ -95,7 +95,7 @@ class AutomationUiController:
         if getattr(self, "runtime", None) is not None:
             self.runtime.context.settings.IsAutomationEnabled = enabled
 
-    def apply_current(self) -> bool:
+    def _apply_current_legacy_duplicate(self) -> bool:
         """将当前编辑态工作流应用到真实运行时中"""
         if getattr(self, "runtime", None) is not None:
             if hasattr(self.runtime, "apply_to_runtime"):

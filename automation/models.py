@@ -73,7 +73,7 @@ class WeatherNotificationActionSettings:
 
 @dataclass
 class CronTriggerSettings:
-    CronExpression: str = "0 8 * * *"
+    CronExpression: str = "* * * * *"
 
 
 @dataclass
@@ -119,7 +119,8 @@ class StringMatchingSettings:
 
 @dataclass
 class CurrentSubjectRuleSettings:
-    SubjectId: str = ""
+    SubjectId: str = "00000000-0000-0000-0000-000000000000"
+    CwSubjectName: str = ""
 
 
 @dataclass
@@ -199,7 +200,7 @@ class ActionItem:
     Exception: str | None = field(default=None, repr=False, compare=False, metadata={"json": False})
     IsWorking: bool = field(default=False, repr=False, compare=False, metadata={"json": False})
     Progress: float | None = field(default=None, repr=False, compare=False, metadata={"json": False})
-    IsCompleted: bool = field(default=False, repr=False, compare=False, metadata={"json": False})
+    IsCompleted: bool = field(default=False, repr=False, compare=False)
     IsNewAdded: bool = field(default=False, repr=False, compare=False, metadata={"json": False})
 
     @property

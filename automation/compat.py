@@ -43,6 +43,9 @@ from .models import (
     Workflow,
 )
 
+EMPTY_GUID = "00000000-0000-0000-0000-000000000000"
+
+
 # =========================================
 # ClassIsland ID -> settings type mappings
 # =========================================
@@ -75,6 +78,7 @@ RULE_SETTINGS_TYPES: dict[str, type] = {
     "classisland.lessons.previousSubject": CurrentSubjectRuleSettings,
     "classisland.lessons.timeState": TimeStateRuleSettings,
     "classisland.weather.currentWeather": CurrentWeatherRuleSettings,
+    "classisland.weather.tomorrowWeather": CurrentWeatherRuleSettings,
     "classisland.weather.hasWeatherAlert": StringMatchingSettings,
     "classisland.weather.rainTime": RainTimeRuleSettings,
     "classisland.weather.sunRiseSet": SunRiseSetRuleSettings,
@@ -154,11 +158,16 @@ def migrate_action_item_compat(item: ActionItem) -> ActionItem:
 # =========================================
 
 def _workflow_from_dict(data: dict[str, Any]) -> Workflow:
-    return Workflow(
+    workflow = Workflow(
         Triggers=[_trigger_from_dict(x) for x in _pick(data, "Triggers", "triggers", default=[]) if isinstance(x, dict)],
-        IsConditionEnabled=bool(_pick(data, "IsConditionEnabled", "isConditionEnabled", default=False)),
+        IsConditionEnabled=_parse_bool(_pick(data, "IsConditionEnabled", "isConditionEnabled", default=False)),
         Ruleset=_ruleset_from_dict(_pick(data, "Ruleset", "ruleset", default={})),
         ActionSet=_action_set_from_dict(_pick(data, "ActionSet", "actionSet", default={})),
+    )
+    return _attach_extra_fields(
+        workflow,
+        data,
+        _json_key_set("Triggers", "IsConditionEnabled", "Ruleset", "ActionSet"),
     )
 
 
@@ -166,9 +175,14 @@ def _trigger_from_dict(data: dict[str, Any]) -> TriggerSettings:
     trigger_id = str(_pick(data, "Id", "id", default=""))
     raw_settings = _pick(data, "Settings", "settings", default=None)
     settings = _deserialize_settings(TRIGGER_SETTINGS_TYPES.get(trigger_id), raw_settings)
-    return TriggerSettings(
+    trigger = TriggerSettings(
         Id=trigger_id,
         Settings=settings,
+    )
+    return _attach_extra_fields(
+        trigger,
+        data,
+        _json_key_set("Id", "Settings", "AssociatedTriggerInfo", "TriggerInstance"),
     )
 
 
@@ -176,13 +190,29 @@ def _action_set_from_dict(data: dict[str, Any]) -> ActionSet:
     status = _parse_action_set_status(_pick(data, "Status", "status", default=0))
     raw_actions = _pick(data, "Actions", "ActionItems", "actions", "actionItems", default=[])
 
-    return ActionSet(
+    action_set = ActionSet(
         Name=str(_pick(data, "Name", "name", default="新行动组")),
         Actions=[_action_item_from_dict(x) for x in raw_actions if isinstance(x, dict)],
-        IsEnabled=bool(_pick(data, "IsEnabled", "isEnabled", default=True)),
-        IsRevertEnabled=bool(_pick(data, "IsRevertEnabled", "isRevertEnabled", default=False)),
+        IsEnabled=_parse_bool(_pick(data, "IsEnabled", "isEnabled", default=True), default=True),
+        IsRevertEnabled=_parse_bool(_pick(data, "IsRevertEnabled", "isRevertEnabled", default=False)),
         Status=status,
         Guid=str(_pick(data, "Guid", "guid", default="")) or _new_guid_fallback(),
+    )
+    return _attach_extra_fields(
+        action_set,
+        data,
+        _json_key_set(
+            "Name",
+            "Actions",
+            "ActionItems",
+            "IsEnabled",
+            "IsRevertEnabled",
+            "Status",
+            "Guid",
+            "IsWorking",
+            "InterruptCts",
+            "RunningTcs",
+        ),
     )
 
 
@@ -194,6 +224,22 @@ def _action_item_from_dict(data: dict[str, Any]) -> ActionItem:
     item = ActionItem(
         Id=action_id,
         Settings=settings,
+        IsCompleted=_parse_bool(_pick(data, "IsCompleted", "isCompleted", default=False)),
+    )
+    item = _attach_extra_fields(
+        item,
+        data,
+        _json_key_set(
+            "IsCompleted",
+            "Id",
+            "Settings",
+            "IsRevertEnabled",
+            "IsRevertActionItem",
+            "Exception",
+            "IsWorking",
+            "Progress",
+            "IsNewAdded",
+        ),
     )
     return migrate_action_item_compat(item)
 
@@ -203,20 +249,30 @@ def _ruleset_from_dict(data: dict[str, Any]) -> Ruleset:
         return Ruleset()
 
     groups = _pick(data, "Groups", "groups", default=[])
-    return Ruleset(
+    ruleset = Ruleset(
         Mode=_parse_ruleset_mode(_pick(data, "Mode", "mode", default=0)),
-        IsReversed=bool(_pick(data, "IsReversed", "isReversed", default=False)),
+        IsReversed=_parse_bool(_pick(data, "IsReversed", "isReversed", default=False)),
         Groups=[_rule_group_from_dict(x) for x in groups if isinstance(x, dict)] or [RuleGroup(Rules=[Rule()])],
+    )
+    return _attach_extra_fields(
+        ruleset,
+        data,
+        _json_key_set("Mode", "IsReversed", "Groups", "State"),
     )
 
 
 def _rule_group_from_dict(data: dict[str, Any]) -> RuleGroup:
     rules = _pick(data, "Rules", "rules", default=[])
-    return RuleGroup(
+    group = RuleGroup(
         Rules=[_rule_from_dict(x) for x in rules if isinstance(x, dict)],
         Mode=_parse_ruleset_mode(_pick(data, "Mode", "mode", default=1)),
-        IsReversed=bool(_pick(data, "IsReversed", "isReversed", default=False)),
-        IsEnabled=bool(_pick(data, "IsEnabled", "isEnabled", default=True)),
+        IsReversed=_parse_bool(_pick(data, "IsReversed", "isReversed", default=False)),
+        IsEnabled=_parse_bool(_pick(data, "IsEnabled", "isEnabled", default=True), default=True),
+    )
+    return _attach_extra_fields(
+        group,
+        data,
+        _json_key_set("Rules", "Mode", "IsReversed", "IsEnabled", "State"),
     )
 
 
@@ -225,10 +281,15 @@ def _rule_from_dict(data: dict[str, Any]) -> Rule:
     raw_settings = _pick(data, "Settings", "settings", default=None)
     settings = _deserialize_settings(RULE_SETTINGS_TYPES.get(rule_id), raw_settings)
 
-    return Rule(
+    rule = Rule(
         Id=rule_id,
-        IsReversed=bool(_pick(data, "IsReversed", "isReversed", default=False)),
+        IsReversed=_parse_bool(_pick(data, "IsReversed", "isReversed", default=False)),
         Settings=settings,
+    )
+    return _attach_extra_fields(
+        rule,
+        data,
+        _json_key_set("Id", "IsReversed", "Settings", "State"),
     )
 
 
@@ -258,14 +319,14 @@ def _dataclass_from_dict(cls: type, raw: dict[str, Any]) -> Any:
 
     inst = cls(**kwargs)
 
-    # 【跨应用兼容性补丁】收集未知字典键（避免擦除原版新增字段或第三方插件配置）
-    known_keys = {f.name for f in fields(cls)}
-    known_keys_camel = {f.name[0].lower() + f.name[1:] for f in fields(cls)}
-    extra = {k: v for k, v in raw.items() if k not in known_keys and k not in known_keys_camel and not k.startswith("_")}
-    if extra:
-        setattr(inst, "_json_extra_fields", extra)
+    if isinstance(inst, CurrentSubjectRuleSettings):
+        _normalize_current_subject_settings(inst)
 
-    return inst
+    # 【跨应用兼容性补丁】收集未知字典键（避免擦除原版新增字段或第三方插件配置）
+    known_keys = _json_key_set(
+        *(f.name for f in fields(cls) if f.metadata.get("json", True) is not False)
+    )
+    return _attach_extra_fields(inst, raw, known_keys)
 
 
 
@@ -324,7 +385,10 @@ def _coerce_value(value: Any, annotation: Any) -> Any:
         if is_dataclass(annotation) and isinstance(value, dict):
             return _dataclass_from_dict(annotation, value)
 
-        if annotation in (str, int, float, bool):
+        if annotation is bool:
+            return _parse_bool(value)
+
+        if annotation in (str, int, float):
             try:
                 return annotation(value)
             except Exception:
@@ -347,6 +411,9 @@ def _to_jsonable(obj: Any) -> Any:
         return obj.value
 
     if is_dataclass(obj):
+        if isinstance(obj, CurrentSubjectRuleSettings):
+            _normalize_current_subject_settings(obj)
+
         result: dict[str, Any] = {}
         for f in fields(obj):
             if f.metadata.get("json", True) is False:
@@ -362,6 +429,9 @@ def _to_jsonable(obj: Any) -> Any:
                 continue
 
             result[f.name] = _to_jsonable(value)
+
+        if isinstance(obj, ActionSet):
+            result["IsWorking"] = _to_jsonable(obj.IsWorking)
 
         # 【跨应用兼容性补丁】将未知的原生字段原样写回 JSON
         extra = getattr(obj, "_json_extra_fields", None)
@@ -392,6 +462,52 @@ class _Missing:
 _MISSING = _Missing()
 
 
+def _is_guid_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    try:
+        uuid.UUID(text)
+        return True
+    except Exception:
+        return False
+
+
+def _normalize_current_subject_settings(settings: CurrentSubjectRuleSettings) -> None:
+    subject_id = str(getattr(settings, "SubjectId", "") or "").strip()
+    subject_name = str(getattr(settings, "CwSubjectName", "") or "").strip()
+
+    if subject_id and not _is_guid_text(subject_id):
+        if not subject_name:
+            settings.CwSubjectName = subject_id
+        settings.SubjectId = EMPTY_GUID
+        return
+
+    if not subject_id:
+        settings.SubjectId = EMPTY_GUID
+
+
+def _json_key_set(*keys: str) -> set[str]:
+    result: set[str] = set()
+    for key in keys:
+        if not key:
+            continue
+        result.add(key)
+        result.add(key[:1].lower() + key[1:])
+    return result
+
+
+def _attach_extra_fields(obj: Any, raw: dict[str, Any], known_keys: set[str]) -> Any:
+    extra = {
+        key: value
+        for key, value in raw.items()
+        if key not in known_keys and not key.startswith("_")
+    }
+    if extra:
+        setattr(obj, "_json_extra_fields", extra)
+    return obj
+
+
 def _pick(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
     for key in keys:
         if key in data:
@@ -401,6 +517,26 @@ def _pick(data: dict[str, Any], *keys: str, default: Any = None) -> Any:
                 return val
     return default
 
+
+
+def _parse_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return bool(value)
+
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("1", "true", "yes", "y", "on"):
+            return True
+        if text in ("0", "false", "no", "n", "off", ""):
+            return False
+
+    return bool(value)
 
 
 def _parse_action_set_status(value: Any) -> ActionSetStatus:

@@ -23,6 +23,19 @@ LOGGER = logging.getLogger(__name__)
 _BUILTINS_REGISTERED = False
 _HANDLERS_REGISTERED = False
 
+_WEATHER_CODE_EXPANSIONS: dict[str, tuple[str, ...]] = {
+    "21": ("7", "8", "21"),
+    "22": ("8", "9", "22"),
+    "23": ("9", "10", "23"),
+    "24": ("10", "11", "24"),
+    "25": ("11", "12", "25"),
+    "26": ("14", "15", "26"),
+    "27": ("15", "16", "27"),
+    "28": ("16", "17", "28"),
+    "301": ("3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "19", "21", "22", "23", "24", "25", "301"),
+    "302": ("6", "13", "14", "15", "16", "17", "26", "27", "28", "34", "302"),
+}
+
 
 # ============================================================
 # Builtin imports
@@ -94,6 +107,7 @@ def _register_rule_metadata() -> None:
 
     # weather
     _safe_register_rule("classisland.weather.currentWeather", "当前天气是", settings_type=CurrentWeatherRuleSettings)
+    _safe_register_rule("classisland.weather.tomorrowWeather", "明天天气是", settings_type=CurrentWeatherRuleSettings)
     _safe_register_rule("classisland.weather.hasWeatherAlert", "存在天气预警", settings_type=StringMatchingSettings)
     _safe_register_rule("classisland.weather.rainTime", "距离降雨开始/结束还剩", settings_type=RainTimeRuleSettings)
     _safe_register_rule("classisland.weather.sunRiseSet", "是否日出/日落", settings_type=SunRiseSetRuleSettings)
@@ -346,6 +360,140 @@ def _get_current_weather_code() -> str:
     LOGGER.debug(f"CurrentWeather: resolved code={code_str!r}")
     return code_str
 
+
+def _weather_code_text(weather_code: Any) -> str:
+    if weather_code is None:
+        return ""
+    return str(weather_code).strip()
+
+
+def _expand_weather_code(weather_code: Any) -> set[str]:
+    code = _weather_code_text(weather_code)
+    if not code:
+        return set()
+    return set(_WEATHER_CODE_EXPANSIONS.get(code, (code,)))
+
+
+def _is_weather_code_matched(actual_weather_code: Any, target_weather_code: Any) -> bool:
+    actual = _weather_code_text(actual_weather_code)
+    target = _weather_code_text(target_weather_code)
+    if not actual or not target:
+        return False
+    if actual == target:
+        return True
+    return bool(_expand_weather_code(actual) & _expand_weather_code(target))
+
+
+def _match_weather_settings(actual_weather_code: Any, settings: CurrentWeatherRuleSettings) -> bool:
+    if settings.IsFuzzyMatch:
+        return _is_weather_code_matched(actual_weather_code, settings.WeatherId)
+    return _weather_code_text(actual_weather_code) == _weather_code_text(settings.WeatherId)
+
+
+def _append_weather_code(codes: list[str], value: Any) -> None:
+    if value in (None, ""):
+        return
+    if isinstance(value, dict):
+        for key in ("from", "to", "From", "To", "weather_code", "weather", "code", "icon", "value"):
+            if key in value:
+                _append_weather_code(codes, value.get(key))
+        return
+    if isinstance(value, list):
+        for item in value:
+            _append_weather_code(codes, item)
+        return
+
+    code = str(value).strip()
+    if code and code not in codes:
+        codes.append(code)
+
+
+def _extract_daily_weather_codes(day_item: Any) -> list[str]:
+    codes: list[str] = []
+    if not isinstance(day_item, dict):
+        _append_weather_code(codes, day_item)
+        return codes
+
+    for key in (
+        "from",
+        "to",
+        "From",
+        "To",
+        "weather_day",
+        "weather_night",
+        "weather_day_icon",
+        "weather_night_icon",
+        "iconDay",
+        "iconNight",
+        "weather_code",
+        "weather",
+        "code",
+        "icon",
+        "dayweather",
+        "nightweather",
+    ):
+        if key in day_item:
+            _append_weather_code(codes, day_item.get(key))
+
+    return codes
+
+
+def _list_from_candidate(candidate: Any) -> list[Any]:
+    if isinstance(candidate, list):
+        return candidate
+    if isinstance(candidate, dict):
+        value = _deep_get(candidate, "data", "weather.value", "value")
+        if isinstance(value, list):
+            return value
+    return []
+
+
+def _get_daily_forecast_items() -> list[Any]:
+    payload = _get_weather_payload()
+    now_payload = _get_weather_now_payload()
+
+    for source in (
+        _deep_get(payload, "daily_forecast.data", "daily_forecast", "forecastDaily.weather.value", "forecastDaily"),
+        _deep_get(now_payload, "daily_forecast.data", "daily_forecast", "forecastDaily.weather.value", "forecastDaily"),
+    ):
+        items = _list_from_candidate(source)
+        if items:
+            LOGGER.debug(f"TomorrowWeather: daily forecast source=cached count={len(items)}")
+            return items
+
+    wm = _get_weather_manager()
+    if wm is None or not hasattr(wm, "fetch_daily_forecast"):
+        LOGGER.debug("TomorrowWeather: fetch_daily_forecast unavailable")
+        return []
+
+    try:
+        daily = wm.fetch_daily_forecast(2)
+    except TypeError:
+        try:
+            daily = wm.fetch_daily_forecast()
+        except Exception as e:
+            LOGGER.debug(f"TomorrowWeather: fetch_daily_forecast failed: {e}")
+            return []
+    except Exception as e:
+        LOGGER.debug(f"TomorrowWeather: fetch_daily_forecast failed: {e}")
+        return []
+
+    items = _list_from_candidate(daily)
+    LOGGER.debug(f"TomorrowWeather: daily forecast source=fetch count={len(items)}")
+    return items
+
+
+def _get_tomorrow_weather_codes() -> list[str]:
+    daily_items = _get_daily_forecast_items()
+    if len(daily_items) <= 1:
+        LOGGER.debug(f"TomorrowWeather: daily forecast too short count={len(daily_items)}")
+        return []
+
+    codes = _extract_daily_weather_codes(daily_items[1])
+    LOGGER.debug(f"TomorrowWeather: resolved codes={codes!r}")
+    return codes
+
+
 def _compute_rain_remaining_minutes(values: list[float]) -> int:
     if len(values) <= 0:
         return 0
@@ -536,7 +684,9 @@ def _rule_subject(kind: str, settings: Any) -> bool:
     if not isinstance(settings, CurrentSubjectRuleSettings):
         return False
 
-    target = str(settings.SubjectId or "").strip()
+    target = str(getattr(settings, "CwSubjectName", "") or "").strip()
+    if not target:
+        target = str(settings.SubjectId or "").strip()
     if not target:
         LOGGER.debug(f"Subject[{kind}] target empty")
         return False
@@ -554,11 +704,26 @@ def _rule_current_weather(settings: Any) -> bool:
         return False
 
     code = _get_current_weather_code()
-    LOGGER.debug(f"CurrentWeather current={code!r} expected={settings.WeatherId!r}")
+    LOGGER.debug(
+        f"CurrentWeather current={code!r} expected={settings.WeatherId!r} "
+        f"fuzzy={settings.IsFuzzyMatch}"
+    )
     if code == "":
         return False
 
-    return str(code) == str(settings.WeatherId)
+    return _match_weather_settings(code, settings)
+
+
+def _rule_tomorrow_weather(settings: Any) -> bool:
+    if not isinstance(settings, CurrentWeatherRuleSettings):
+        return False
+
+    codes = _get_tomorrow_weather_codes()
+    LOGGER.debug(
+        f"TomorrowWeather current={codes!r} expected={settings.WeatherId!r} "
+        f"fuzzy={settings.IsFuzzyMatch}"
+    )
+    return any(_match_weather_settings(code, settings) for code in codes)
 
 
 def _rule_has_weather_alert(settings: Any) -> bool:
@@ -673,6 +838,7 @@ def _register_rule_handlers() -> None:
     set_rule_handler("classisland.lessons.timeState", _rule_time_state)
 
     set_rule_handler("classisland.weather.currentWeather", _rule_current_weather)
+    set_rule_handler("classisland.weather.tomorrowWeather", _rule_tomorrow_weather)
     set_rule_handler("classisland.weather.hasWeatherAlert", _rule_has_weather_alert)
     set_rule_handler("classisland.weather.rainTime", _rule_rain_time)
     set_rule_handler("classisland.weather.sunRiseSet", _rule_sunrise_sunset)
